@@ -39,6 +39,8 @@ const MODEL_MAPPING = {
    "nvidia/nemotron-3-super-120b-a12b"
    "nvidia/nemotron-3-ultra-550b-a55b"
    "deepseek-ai/deepseek-v4-flash"
+   "meta/llama-3.2-3b-instruct"
+   "meta/llama-3.2-1b-instruct"
 };
 
 // Root endpoint
