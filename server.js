@@ -38,6 +38,7 @@ const MODEL_MAPPING = {
   'gemini-pro': 'moonshotai/kimi-k2.5'
    "nvidia/nemotron-3-super-120b-a12b"
    "nvidia/nemotron-3-ultra-550b-a55b"
+   "deepseek-ai/deepseek-v4-flash"
 };
 
 // Root endpoint
