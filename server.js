@@ -41,6 +41,8 @@ const MODEL_MAPPING = {
    "deepseek-ai/deepseek-v4-flash"
    "meta/llama-3.2-3b-instruct"
    "meta/llama-3.2-1b-instruct"
+   "nvidia/nemotron-3-nano-30b-a3b"
+   "nvidia/nemotron-3-embed-1b"
 };
 
 // Root endpoint
