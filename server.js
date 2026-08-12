@@ -43,6 +43,8 @@ const MODEL_MAPPING = {
    "meta/llama-3.2-1b-instruct"
    "nvidia/nemotron-3-nano-30b-a3b"
    "nvidia/nemotron-3-embed-1b"
+   "meta/muse-glimmer-30b"
+   "nvidia/nemotron-3.5-lightning-30b-a3b"
 };
 
 // Root endpoint
