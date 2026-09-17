@@ -76,6 +76,8 @@ const MODEL_MAPPING = {
 
   'nemotron-3-ultra': DEFAULT_MODEL,
 
+  'deepseek-ai/deepseek-v4-flash-0731': DEFAULT_MODEL,
+  
   [DEFAULT_MODEL]: DEFAULT_MODEL
 };
 
