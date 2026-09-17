@@ -539,16 +539,13 @@ app.post(
         body.stop;
 
     }
-
-
-    // --------------------------------------------------------
-    // NEMOTRON THINKING
-    // --------------------------------------------------------
+ 
     // ============================================================
     // NEMOTRON THINKING
     // ============================================================
     // Thinking is disabled because NVIDIA's endpoint does not
     // accept the extra_body parameter used by some OpenAI clients.
+    
       }
 
     };
