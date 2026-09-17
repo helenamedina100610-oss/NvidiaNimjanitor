@@ -75,8 +75,7 @@ const MODEL_MAPPING = {
   'gemini-pro': DEFAULT_MODEL,
 
   'nemotron-3-ultra': DEFAULT_MODEL,
-
-  'deepseek-ai/deepseek-v4-flash-0731': DEFAULT_MODEL,
+  'nemotron-3-ultra-550b-a55b': DEFAULT_MODEL,
   
   [DEFAULT_MODEL]: DEFAULT_MODEL
 };
