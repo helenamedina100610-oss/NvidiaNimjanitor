@@ -18,7 +18,7 @@ const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
 
 const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL ||
-  'nvidia/nemotron-3-ultra-550b-a55b';
+  'nvidia/nemotron-3-super-120b-a12b';
 
 const SHOW_REASONING =
   String(process.env.SHOW_REASONING || 'false').toLowerCase() === 'true';
