@@ -457,7 +457,7 @@ app.post(
     const temperature =
       typeof body.temperature === 'number'
         ? body.temperature
-        : 0.7;
+        : 0.9;
 
 
     const maxTokens =
