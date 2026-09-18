@@ -20,11 +20,13 @@ const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL ||
   'nvidia/nemotron-3-super-120b-a12b';
 
+// Thinking is enabled for the model,
+// but reasoning content is NOT shown to Janitor.
 const SHOW_REASONING =
   String(process.env.SHOW_REASONING || 'false').toLowerCase() === 'true';
 
 const ENABLE_THINKING =
-  String(process.env.ENABLE_THINKING || 'false').toLowerCase() === 'true';
+  String(process.env.ENABLE_THINKING || 'true').toLowerCase() === 'true';
 
 app.use(cors());
 
@@ -41,11 +43,13 @@ app.use(express.urlencoded({
 // ============================================================
 
 app.use((req, res, next) => {
+
   console.log(
     `${new Date().toISOString()} ${req.method} ${req.path}`
   );
 
   next();
+
 });
 
 
@@ -54,6 +58,7 @@ app.use((req, res, next) => {
 // ============================================================
 
 const MODEL_MAPPING = {
+
   'gpt-3.5-turbo': DEFAULT_MODEL,
   'gpt-3.5-turbo-16k': DEFAULT_MODEL,
 
@@ -76,8 +81,9 @@ const MODEL_MAPPING = {
 
   'nemotron-3-ultra': DEFAULT_MODEL,
   'nemotron-3-ultra-550b-a55b': DEFAULT_MODEL,
-  
+
   [DEFAULT_MODEL]: DEFAULT_MODEL
+
 };
 
 
@@ -97,6 +103,7 @@ function resolveModel(requestedModel) {
   }
 
   return MODEL_MAPPING[requestedModel] || DEFAULT_MODEL;
+
 }
 
 
@@ -107,12 +114,17 @@ function makeError(
 ) {
 
   return {
+
     error: {
+
       message,
       type,
       code
+
     }
+
   };
+
 }
 
 
@@ -129,7 +141,9 @@ function normalizeMessages(messages) {
     }
 
     return {
+
       role: message.role,
+
       content: message.content,
 
       ...(message.name
@@ -143,9 +157,11 @@ function normalizeMessages(messages) {
       ...(message.tool_call_id
         ? { tool_call_id: message.tool_call_id }
         : {})
+
     };
 
   });
+
 }
 
 
@@ -179,22 +195,30 @@ function extractText(value) {
 
       })
       .join('');
+
   }
 
   return String(value);
+
 }
 
 
 function sendSSE(res, payload) {
 
   if (typeof payload === 'string') {
-    res.write(`data: ${payload}\n\n`);
+
+    res.write(
+      `data: ${payload}\n\n`
+    );
+
     return;
+
   }
 
   res.write(
     `data: ${JSON.stringify(payload)}\n\n`
   );
+
 }
 
 
@@ -207,19 +231,32 @@ function makeChatChunk({
 }) {
 
   return {
+
     id,
-    object: 'chat.completion.chunk',
+
+    object:
+      'chat.completion.chunk',
+
     created,
+
     model,
 
     choices: [
+
       {
+
         index: 0,
+
         delta,
+
         finish_reason
+
       }
+
     ]
+
   };
+
 }
 
 
@@ -227,7 +264,8 @@ function getNvidiaErrorMessage(error) {
 
   if (error.response?.data) {
 
-    const data = error.response.data;
+    const data =
+      error.response.data;
 
     if (typeof data === 'string') {
       return data;
@@ -242,16 +280,22 @@ function getNvidiaErrorMessage(error) {
     }
 
     try {
+
       return JSON.stringify(data);
+
     } catch {
+
       return 'NVIDIA API returned an error.';
+
     }
+
   }
 
   return (
     error.message ||
     'NVIDIA API request failed.'
   );
+
 }
 
 
@@ -259,10 +303,12 @@ function getNvidiaErrorMessage(error) {
 // HEALTH CHECK
 // ============================================================
 
-app.get('/health', (req, res) => {
+function healthResponse(req, res) {
 
   res.json({
-    status: 'ok',
+
+    status:
+      'ok',
 
     service:
       'OpenAI to NVIDIA NIM Proxy',
@@ -278,33 +324,15 @@ app.get('/health', (req, res) => {
 
     nim_api_configured:
       Boolean(NVIDIA_API_KEY)
+
   });
 
-});
+}
 
 
-app.get('/health/', (req, res) => {
+app.get('/health', healthResponse);
 
-  res.json({
-    status: 'ok',
-
-    service:
-      'OpenAI to NVIDIA NIM Proxy',
-
-    model:
-      DEFAULT_MODEL,
-
-    reasoning_display:
-      SHOW_REASONING,
-
-    thinking_mode:
-      ENABLE_THINKING,
-
-    nim_api_configured:
-      Boolean(NVIDIA_API_KEY)
-  });
-
-});
+app.get('/health/', healthResponse);
 
 
 // ============================================================
@@ -316,19 +344,23 @@ app.get('/v1/models', (req, res) => {
   const aliases =
     Object.keys(MODEL_MAPPING);
 
-  const models = aliases.map((model) => ({
+  const models =
+    aliases.map((model) => ({
 
-    id: model,
+      id: model,
 
-    object: 'model',
+      object:
+        'model',
 
-    created:
-      Math.floor(Date.now() / 1000),
+      created:
+        Math.floor(
+          Date.now() / 1000
+        ),
 
-    owned_by:
-      'nvidia-nim'
+      owned_by:
+        'nvidia-nim'
 
-  }));
+    }));
 
 
   if (
@@ -340,12 +372,16 @@ app.get('/v1/models', (req, res) => {
 
     models.push({
 
-      id: DEFAULT_MODEL,
+      id:
+        DEFAULT_MODEL,
 
-      object: 'model',
+      object:
+        'model',
 
       created:
-        Math.floor(Date.now() / 1000),
+        Math.floor(
+          Date.now() / 1000
+        ),
 
       owned_by:
         'nvidia'
@@ -357,9 +393,11 @@ app.get('/v1/models', (req, res) => {
 
   res.json({
 
-    object: 'list',
+    object:
+      'list',
 
-    data: models
+    data:
+      models
 
   });
 
@@ -392,11 +430,17 @@ app.post(
       return res
         .status(500)
         .json(
+
           makeError(
+
             'NVIDIA API key is not configured on the proxy server.',
+
             'server_error',
+
             500
+
           )
+
         );
 
     }
@@ -405,8 +449,10 @@ app.post(
     const body =
       req.body || {};
 
+
     const requestedModel =
       body.model;
+
 
     const messages =
       normalizeMessages(
@@ -423,11 +469,17 @@ app.post(
       return res
         .status(400)
         .json(
+
           makeError(
+
             'Missing required field: messages',
+
             'invalid_request_error',
+
             400
+
           )
+
         );
 
     }
@@ -451,24 +503,28 @@ app.post(
 
 
     // --------------------------------------------------------
-    // PARAMETERS
+    // GENERATION PARAMETERS
     // --------------------------------------------------------
+
+    // NVIDIA recommends temperature=1.0
+    // and top_p=0.95 for Nemotron-3-Super.
 
     const temperature =
       typeof body.temperature === 'number'
         ? body.temperature
-        : 0.9;
+        : 1.0;
 
 
     const maxTokens =
       typeof body.max_tokens === 'number'
+
         ? body.max_tokens
 
-        : typeof body.max_completion_tokens ===
-          'number'
+        : typeof body.max_completion_tokens === 'number'
+
           ? body.max_completion_tokens
 
-          : 8192;
+          : 16384;
 
 
     const stream =
@@ -488,6 +544,11 @@ app.post(
 
       temperature,
 
+      top_p:
+        typeof body.top_p === 'number'
+          ? body.top_p
+          : 0.95,
+
       max_tokens:
         maxTokens,
 
@@ -501,18 +562,7 @@ app.post(
     // --------------------------------------------------------
 
     if (
-      typeof body.top_p === 'number'
-    ) {
-
-      nimRequest.top_p =
-        body.top_p;
-
-    }
-
-
-    if (
-      typeof body.presence_penalty ===
-      'number'
+      typeof body.presence_penalty === 'number'
     ) {
 
       nimRequest.presence_penalty =
@@ -522,8 +572,7 @@ app.post(
 
 
     if (
-      typeof body.frequency_penalty ===
-      'number'
+      typeof body.frequency_penalty === 'number'
     ) {
 
       nimRequest.frequency_penalty =
@@ -540,12 +589,47 @@ app.post(
         body.stop;
 
     }
- 
-    // ============================================================
-    // NEMOTRON THINKING
-    // ============================================================
 
-    // Thinking disabled
+
+    // ========================================================
+    // NEMOTRON THINKING
+    // ========================================================
+
+    // IMPORTANT:
+    //
+    // NVIDIA's current documentation expects
+    // chat_template_kwargs DIRECTLY in the request body.
+    //
+    // We intentionally do NOT use:
+    //
+    // nimRequest.extra_body = ...
+    //
+    // because the NVIDIA endpoint previously rejected that
+    // structure for this deployment.
+
+    nimRequest.chat_template_kwargs = {
+
+      enable_thinking:
+        ENABLE_THINKING
+
+    };
+
+
+    console.log(
+      `Thinking mode: ${
+        ENABLE_THINKING
+          ? 'ENABLED'
+          : 'DISABLED'
+      }`
+    );
+
+
+    console.log(
+      `Generation: temperature=${temperature}, top_p=${
+        nimRequest.top_p
+      }, max_tokens=${maxTokens}`
+    );
+
 
     console.log(
       `Sending request to NVIDIA: ${
@@ -596,10 +680,13 @@ app.post(
       if (res.headersSent) {
 
         try {
+
           res.end();
+
         } catch (_) {}
 
         return;
+
       }
 
 
@@ -611,7 +698,9 @@ app.post(
       res
         .status(status)
         .json(
+
           makeError(
+
             getNvidiaErrorMessage(
               error
             ),
@@ -621,7 +710,9 @@ app.post(
               : 'invalid_request_error',
 
             status
+
           )
+
         );
 
     }
@@ -752,7 +843,9 @@ async function handleNormalRequest(
               );
 
 
-            // Only show reasoning if explicitly enabled.
+            // Reasoning is intentionally hidden
+            // unless SHOW_REASONING=true.
+
             if (
               SHOW_REASONING &&
               reasoning
@@ -785,6 +878,7 @@ async function handleNormalRequest(
             };
 
           }
+
         )
 
       : [
@@ -1014,12 +1108,9 @@ async function handleStreamingRequest(
     'no'
   );
 
-  if (
-    res.flushHeaders
-  ) {
 
+  if (res.flushHeaders) {
     res.flushHeaders();
-
   }
 
 
@@ -1346,9 +1437,7 @@ async function handleStreamingRequest(
     (chunk) => {
 
       buffer +=
-        chunk.toString(
-          'utf8'
-        );
+        chunk.toString('utf8');
 
 
       const events =
@@ -1439,9 +1528,7 @@ async function handleStreamingRequest(
       );
 
 
-      if (
-        !res.headersSent
-      ) {
+      if (!res.headersSent) {
 
         res
           .status(500)
