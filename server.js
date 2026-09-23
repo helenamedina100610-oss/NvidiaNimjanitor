@@ -18,7 +18,7 @@ const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
 
 const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL ||
-  moonshotai/kimi-k3;
+  'moonshotai/kimi-k3';
 
 // Thinking is enabled for the model,
 // but reasoning content is NOT shown to Janitor.
