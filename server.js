@@ -63,16 +63,17 @@ app.use(
 
 app.use(
   (req, res, next) => {
-
     console.log(
-      `${new Date().toISOString()} ${req.method} ${req.path}`
+      new Date().toISOString() +
+      ' ' +
+      req.method +
+      ' ' +
+      req.path
     );
 
     next();
-
   }
 );
-
 
 // ============================================================
 // MODEL MAPPING
