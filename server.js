@@ -1,5 +1,7 @@
+```javascript
 // server.js - OpenAI-compatible proxy for NVIDIA NIM
 // Designed for Render + Janitor AI
+// Model: moonshotai/kimi-k3
 
 const express = require('express');
 const cors = require('cors');
@@ -14,43 +16,62 @@ const NVIDIA_API_BASE = (
   'https://integrate.api.nvidia.com/v1'
 ).replace(/\/+$/, '');
 
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
+const NVIDIA_API_KEY =
+  process.env.NVIDIA_API_KEY || '';
 
 const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL ||
   'moonshotai/kimi-k3';
 
-// Thinking is enabled for the model,
-// but reasoning content is NOT shown to Janitor.
-const SHOW_REASONING =
-  String(process.env.SHOW_REASONING || 'false').toLowerCase() === 'true';
 
-const ENABLE_THINKING =
-  String(process.env.ENABLE_THINKING || 'true').toLowerCase() === 'true';
+// ============================================================
+// REASONING
+// ============================================================
+
+// Reasoning content is NOT shown to Janitor.
+// Kimi-K3 always has thinking enabled.
+// We use NVIDIA's documented reasoning_effort parameter.
+
+const SHOW_REASONING =
+  String(
+    process.env.SHOW_REASONING || 'false'
+  ).toLowerCase() === 'true';
+
+const REASONING_EFFORT =
+  process.env.REASONING_EFFORT || 'max';
+
 
 app.use(cors());
 
-app.use(express.json({ limit: '5mb' }));
+app.use(
+  express.json({
+    limit: '5mb'
+  })
+);
 
-app.use(express.urlencoded({
-  extended: true,
-  limit: '5mb'
-}));
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: '5mb'
+  })
+);
 
 
 // ============================================================
 // REQUEST LOGGER
 // ============================================================
 
-app.use((req, res, next) => {
+app.use(
+  (req, res, next) => {
 
-  console.log(
-    `${new Date().toISOString()} ${req.method} ${req.path}`
-  );
+    console.log(
+      `${new Date().toISOString()} ${req.method} ${req.path}`
+    );
 
-  next();
+    next();
 
-});
+  }
+);
 
 
 // ============================================================
@@ -59,30 +80,56 @@ app.use((req, res, next) => {
 
 const MODEL_MAPPING = {
 
-  'gpt-3.5-turbo': DEFAULT_MODEL,
-  'gpt-3.5-turbo-16k': DEFAULT_MODEL,
+  'gpt-3.5-turbo':
+    DEFAULT_MODEL,
 
-  'gpt-4': DEFAULT_MODEL,
-  'gpt-4-turbo': DEFAULT_MODEL,
-  'gpt-4-turbo-preview': DEFAULT_MODEL,
+  'gpt-3.5-turbo-16k':
+    DEFAULT_MODEL,
 
-  'gpt-4o': DEFAULT_MODEL,
-  'gpt-4o-mini': DEFAULT_MODEL,
+  'gpt-4':
+    DEFAULT_MODEL,
 
-  'gpt-4.1': DEFAULT_MODEL,
-  'gpt-4.1-mini': DEFAULT_MODEL,
+  'gpt-4-turbo':
+    DEFAULT_MODEL,
 
-  'claude-3-opus': DEFAULT_MODEL,
-  'claude-3-sonnet': DEFAULT_MODEL,
-  'claude-3.5-sonnet': DEFAULT_MODEL,
-  'claude-3.7-sonnet': DEFAULT_MODEL,
+  'gpt-4-turbo-preview':
+    DEFAULT_MODEL,
 
-  'gemini-pro': DEFAULT_MODEL,
+  'gpt-4o':
+    DEFAULT_MODEL,
 
-  'nemotron-3-ultra': DEFAULT_MODEL,
-  'nemotron-3-ultra-550b-a55b': DEFAULT_MODEL,
+  'gpt-4o-mini':
+    DEFAULT_MODEL,
 
-  [DEFAULT_MODEL]: DEFAULT_MODEL
+  'gpt-4.1':
+    DEFAULT_MODEL,
+
+  'gpt-4.1-mini':
+    DEFAULT_MODEL,
+
+  'claude-3-opus':
+    DEFAULT_MODEL,
+
+  'claude-3-sonnet':
+    DEFAULT_MODEL,
+
+  'claude-3.5-sonnet':
+    DEFAULT_MODEL,
+
+  'claude-3.7-sonnet':
+    DEFAULT_MODEL,
+
+  'gemini-pro':
+    DEFAULT_MODEL,
+
+  'nemotron-3-ultra':
+    DEFAULT_MODEL,
+
+  'nemotron-3-ultra-550b-a55b':
+    DEFAULT_MODEL,
+
+  [DEFAULT_MODEL]:
+    DEFAULT_MODEL
 
 };
 
@@ -97,12 +144,24 @@ function resolveModel(requestedModel) {
     return DEFAULT_MODEL;
   }
 
-  // Allow NVIDIA model IDs to pass directly.
-  if (requestedModel.startsWith('nvidia/')) {
+  // Allow NVIDIA model IDs directly.
+  if (
+    requestedModel.startsWith('nvidia/')
+  ) {
     return requestedModel;
   }
 
-  return MODEL_MAPPING[requestedModel] || DEFAULT_MODEL;
+  // Allow other NVIDIA/Moonshot IDs directly.
+  if (
+    requestedModel.includes('/')
+  ) {
+    return requestedModel;
+  }
+
+  return (
+    MODEL_MAPPING[requestedModel] ||
+    DEFAULT_MODEL
+  );
 
 }
 
@@ -136,26 +195,47 @@ function normalizeMessages(messages) {
 
   return messages.map((message) => {
 
-    if (!message || typeof message !== 'object') {
+    if (
+      !message ||
+      typeof message !== 'object'
+    ) {
       return message;
     }
 
     return {
 
-      role: message.role,
+      role:
+        message.role,
 
-      content: message.content,
+      content:
+        message.content,
 
       ...(message.name
-        ? { name: message.name }
+        ? {
+            name:
+              message.name
+          }
         : {}),
 
       ...(message.tool_calls
-        ? { tool_calls: message.tool_calls }
+        ? {
+            tool_calls:
+              message.tool_calls
+          }
         : {}),
 
       ...(message.tool_call_id
-        ? { tool_call_id: message.tool_call_id }
+        ? {
+            tool_call_id:
+              message.tool_call_id
+          }
+        : {}),
+
+      ...(message.reasoning_content
+        ? {
+            reasoning_content:
+              message.reasoning_content
+          }
         : {})
 
     };
@@ -180,7 +260,9 @@ function extractText(value) {
     return value
       .map((part) => {
 
-        if (typeof part === 'string') {
+        if (
+          typeof part === 'string'
+        ) {
           return part;
         }
 
@@ -203,9 +285,14 @@ function extractText(value) {
 }
 
 
-function sendSSE(res, payload) {
+function sendSSE(
+  res,
+  payload
+) {
 
-  if (typeof payload === 'string') {
+  if (
+    typeof payload === 'string'
+  ) {
 
     res.write(
       `data: ${payload}\n\n`
@@ -267,25 +354,41 @@ function getNvidiaErrorMessage(error) {
     const data =
       error.response.data;
 
-    if (typeof data === 'string') {
+    if (
+      typeof data === 'string'
+    ) {
+
       return data;
+
     }
 
-    if (data.error?.message) {
+    if (
+      data.error?.message
+    ) {
+
       return data.error.message;
+
     }
 
-    if (data.message) {
+    if (
+      data.message
+    ) {
+
       return data.message;
+
     }
 
     try {
 
-      return JSON.stringify(data);
+      return JSON.stringify(
+        data
+      );
 
     } catch {
 
-      return 'NVIDIA API returned an error.';
+      return (
+        'NVIDIA API returned an error.'
+      );
 
     }
 
@@ -303,7 +406,10 @@ function getNvidiaErrorMessage(error) {
 // HEALTH CHECK
 // ============================================================
 
-function healthResponse(req, res) {
+function healthResponse(
+  req,
+  res
+) {
 
   res.json({
 
@@ -319,8 +425,8 @@ function healthResponse(req, res) {
     reasoning_display:
       SHOW_REASONING,
 
-    thinking_mode:
-      ENABLE_THINKING,
+    reasoning_effort:
+      REASONING_EFFORT,
 
     nim_api_configured:
       Boolean(NVIDIA_API_KEY)
@@ -330,78 +436,93 @@ function healthResponse(req, res) {
 }
 
 
-app.get('/health', healthResponse);
+app.get(
+  '/health',
+  healthResponse
+);
 
-app.get('/health/', healthResponse);
+app.get(
+  '/health/',
+  healthResponse
+);
 
 
 // ============================================================
 // MODELS ENDPOINT
 // ============================================================
 
-app.get('/v1/models', (req, res) => {
+app.get(
+  '/v1/models',
+  (req, res) => {
 
-  const aliases =
-    Object.keys(MODEL_MAPPING);
+    const aliases =
+      Object.keys(
+        MODEL_MAPPING
+      );
 
-  const models =
-    aliases.map((model) => ({
+    const models =
+      aliases.map(
+        (model) => ({
 
-      id: model,
+          id:
+            model,
+
+          object:
+            'model',
+
+          created:
+            Math.floor(
+              Date.now() / 1000
+            ),
+
+          owned_by:
+            'nvidia-nim'
+
+        })
+      );
+
+
+    if (
+      !models.some(
+        (model) =>
+          model.id ===
+          DEFAULT_MODEL
+      )
+    ) {
+
+      models.push({
+
+        id:
+          DEFAULT_MODEL,
+
+        object:
+          'model',
+
+        created:
+          Math.floor(
+            Date.now() / 1000
+          ),
+
+        owned_by:
+          'nvidia-nim'
+
+      });
+
+    }
+
+
+    res.json({
 
       object:
-        'model',
+        'list',
 
-      created:
-        Math.floor(
-          Date.now() / 1000
-        ),
-
-      owned_by:
-        'nvidia-nim'
-
-    }));
-
-
-  if (
-    !models.some(
-      (model) =>
-        model.id === DEFAULT_MODEL
-    )
-  ) {
-
-    models.push({
-
-      id:
-        DEFAULT_MODEL,
-
-      object:
-        'model',
-
-      created:
-        Math.floor(
-          Date.now() / 1000
-        ),
-
-      owned_by:
-        'nvidia'
+      data:
+        models
 
     });
 
   }
-
-
-  res.json({
-
-    object:
-      'list',
-
-    data:
-      models
-
-  });
-
-});
+);
 
 
 // ============================================================
@@ -464,7 +585,9 @@ app.post(
     // REQUIRED MESSAGE CHECK
     // --------------------------------------------------------
 
-    if (!messages.length) {
+    if (
+      !messages.length
+    ) {
 
       return res
         .status(400)
@@ -497,7 +620,8 @@ app.post(
 
     console.log(
       `Model requested: ${
-        requestedModel || '(none)'
+        requestedModel ||
+        '(none)'
       } -> NVIDIA: ${nimModel}`
     );
 
@@ -506,14 +630,17 @@ app.post(
     // GENERATION PARAMETERS
     // --------------------------------------------------------
 
-    // NVIDIA recommends temperature=1.0
-    // and top_p=0.95 for Nemotron-3-Super.
+    // KEEPING YOUR ORIGINAL TEMPERATURE.
+    // Do NOT change this unless you intentionally
+    // want different model behavior.
 
     const temperature =
       typeof body.temperature === 'number'
         ? body.temperature
         : 1.0;
 
+
+    // KEEPING YOUR ORIGINAL TOKEN LIMIT.
 
     const maxTokens =
       typeof body.max_tokens === 'number'
@@ -528,12 +655,28 @@ app.post(
 
 
     const stream =
-      Boolean(body.stream);
+      Boolean(
+        body.stream
+      );
 
 
     // --------------------------------------------------------
     // NVIDIA REQUEST
     // --------------------------------------------------------
+
+    // IMPORTANT FOR KIMI-K3:
+    //
+    // Kimi-K3 does NOT expose:
+    //
+    // - top_p
+    // - presence_penalty
+    // - frequency_penalty
+    // - n
+    //
+    // Therefore we do NOT send those parameters.
+    //
+    // Kimi-K3 uses reasoning_effort instead of
+    // chat_template_kwargs.enable_thinking.
 
     const nimRequest = {
 
@@ -544,90 +687,69 @@ app.post(
 
       temperature,
 
-      top_p:
-        typeof body.top_p === 'number'
-          ? body.top_p
-          : 0.95,
-
       max_tokens:
         maxTokens,
 
-      stream
+      stream,
+
+      reasoning_effort:
+        REASONING_EFFORT
 
     };
 
 
     // --------------------------------------------------------
-    // OPTIONAL PARAMETERS
+    // STOP
+    // --------------------------------------------------------
+
+    // Stop is not part of the documented Kimi-K3
+    // parameter list, so it is intentionally NOT forwarded.
+
+
+    // --------------------------------------------------------
+    // OPTIONAL SEED
     // --------------------------------------------------------
 
     if (
-      typeof body.presence_penalty === 'number'
+      typeof body.seed === 'number'
     ) {
 
-      nimRequest.presence_penalty =
-        body.presence_penalty;
+      nimRequest.seed =
+        body.seed;
 
     }
 
+
+    // --------------------------------------------------------
+    // STREAM OPTIONS
+    // --------------------------------------------------------
 
     if (
-      typeof body.frequency_penalty === 'number'
+      body.stream_options &&
+      typeof body.stream_options === 'object'
     ) {
 
-      nimRequest.frequency_penalty =
-        body.frequency_penalty;
+      nimRequest.stream_options =
+        body.stream_options;
 
     }
-
-
-    if (
-      body.stop !== undefined
-    ) {
-
-      nimRequest.stop =
-        body.stop;
-
-    }
-
-
-    // ========================================================
-    // NEMOTRON THINKING
-    // ========================================================
-
-    // IMPORTANT:
-    //
-    // NVIDIA's current documentation expects
-    // chat_template_kwargs DIRECTLY in the request body.
-    //
-    // We intentionally do NOT use:
-    //
-    // nimRequest.extra_body = ...
-    //
-    // because the NVIDIA endpoint previously rejected that
-    // structure for this deployment.
-
-    nimRequest.chat_template_kwargs = {
-
-      enable_thinking:
-        ENABLE_THINKING
-
-    };
 
 
     console.log(
-      `Thinking mode: ${
-        ENABLE_THINKING
-          ? 'ENABLED'
-          : 'DISABLED'
+      `Reasoning effort: ${
+        REASONING_EFFORT
       }`
     );
 
 
     console.log(
-      `Generation: temperature=${temperature}, top_p=${
-        nimRequest.top_p
-      }, max_tokens=${maxTokens}`
+      `Generation: temperature=${
+        temperature
+      }, max_tokens=${
+        maxTokens
+      }, stream=${
+        stream
+      }`
     );
 
 
@@ -635,6 +757,13 @@ app.post(
       `Sending request to NVIDIA: ${
         NVIDIA_API_BASE
       }/chat/completions`
+    );
+
+
+    console.log(
+      `NVIDIA model: ${
+        nimModel
+      }`
     );
 
 
@@ -677,7 +806,9 @@ app.post(
       );
 
 
-      if (res.headersSent) {
+      if (
+        res.headersSent
+      ) {
 
         try {
 
@@ -822,7 +953,9 @@ async function handleNormalRequest(
   // ----------------------------------------------------------
 
   const choices =
-    Array.isArray(data.choices)
+    Array.isArray(
+      data.choices
+    )
 
       ? data.choices.map(
           (choice, index) => {
@@ -843,8 +976,8 @@ async function handleNormalRequest(
               );
 
 
-            // Reasoning is intentionally hidden
-            // unless SHOW_REASONING=true.
+            // Reasoning stays hidden unless
+            // SHOW_REASONING=true.
 
             if (
               SHOW_REASONING &&
@@ -1031,7 +1164,9 @@ async function handleStreamingRequest(
     );
 
 
-    if (!res.headersSent) {
+    if (
+      !res.headersSent
+    ) {
 
       res
         .status(response.status)
@@ -1109,8 +1244,12 @@ async function handleStreamingRequest(
   );
 
 
-  if (res.flushHeaders) {
+  if (
+    res.flushHeaders
+  ) {
+
     res.flushHeaders();
+
   }
 
 
@@ -1528,7 +1667,9 @@ async function handleStreamingRequest(
       );
 
 
-      if (!res.headersSent) {
+      if (
+        !res.headersSent
+      ) {
 
         res
           .status(500)
@@ -1584,35 +1725,41 @@ async function handleStreamingRequest(
 // ROOT
 // ============================================================
 
-app.get('/', (req, res) => {
+app.get(
+  '/',
+  (req, res) => {
 
-  res.json({
+    res.json({
 
-    status:
-      'online',
+      status:
+        'online',
 
-    service:
-      'OpenAI to NVIDIA NIM Proxy',
+      service:
+        'OpenAI to NVIDIA NIM Proxy',
 
-    endpoints: {
+      endpoints: {
 
-      health:
-        '/health',
+        health:
+          '/health',
 
-      models:
-        '/v1/models',
+        models:
+          '/v1/models',
 
-      chat:
-        '/v1/chat/completions'
+        chat:
+          '/v1/chat/completions'
 
-    },
+      },
 
-    model:
-      DEFAULT_MODEL
+      model:
+        DEFAULT_MODEL,
 
-  });
+      reasoning_effort:
+        REASONING_EFFORT
 
-});
+    });
+
+  }
+);
 
 
 // ============================================================
@@ -1686,16 +1833,20 @@ const server =
       );
 
       console.log(
-        `Reasoning display: ${
-          SHOW_REASONING
-            ? 'ENABLED'
-            : 'DISABLED'
-        }`
+        `Temperature default: 1.0`
       );
 
       console.log(
-        `Thinking mode: ${
-          ENABLE_THINKING
+        `Max tokens default: 16384`
+      );
+
+      console.log(
+        `Reasoning effort: ${REASONING_EFFORT}`
+      );
+
+      console.log(
+        `Reasoning display: ${
+          SHOW_REASONING
             ? 'ENABLED'
             : 'DISABLED'
         }`
@@ -1735,3 +1886,4 @@ server.on(
 // ============================================================
 
 module.exports = app;
+```
