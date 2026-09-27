@@ -14,7 +14,7 @@ const NVIDIA_API_BASE = (
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
 
 const DEFAULT_MODEL =
-  process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b';
+  process.env.NVIDIA_MODEL || 'moonshotai/kimi-k3';
 
 const SHOW_REASONING =
   String(process.env.SHOW_REASONING || 'false').toLowerCase() === 'true';
