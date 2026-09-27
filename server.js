@@ -74,21 +74,6 @@ const MODEL_MAPPING = {
   'gpt-4.1-mini': DEFAULT_MODEL,
   'gpt-5': DEFAULT_MODEL,
   'gpt-5-mini': DEFAULT_MODEL,
-
-  'claude-3': DEFAULT_MODEL,
-  'claude-3-opus': DEFAULT_MODEL,
-  'claude-3-sonnet': DEFAULT_MODEL,
-  'claude-3-haiku': DEFAULT_MODEL,
-  'claude-3.5-sonnet': DEFAULT_MODEL,
-  'claude-3.7-sonnet': DEFAULT_MODEL,
-
-  'gemini-pro': DEFAULT_MODEL,
-  'gemini-1.5-pro': DEFAULT_MODEL,
-  'gemini-2.0-flash': DEFAULT_MODEL,
-
-  'nemotron': DEFAULT_MODEL,
-  'nemotron-3-super': DEFAULT_MODEL,
-  'nemotron-3-ultra': DEFAULT_MODEL
 };
 
 
