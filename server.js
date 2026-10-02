@@ -14,7 +14,7 @@ const NVIDIA_API_BASE = (
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
 
 const DEFAULT_MODEL =
-  process.env.NVIDIA_MODEL || 'deepseek-ai/DeepSeek-V3';
+  process.env.NVIDIA_MODEL || 'google/gemma-4-31b-it:free';
 
 const SHOW_REASONING =
   String(process.env.SHOW_REASONING || 'false').toLowerCase() === 'true';
