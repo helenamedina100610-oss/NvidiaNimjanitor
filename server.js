@@ -536,162 +536,659 @@ app.post(
       '/chat/completions'
     );
 
+   // ========================================================
+// STREAMING REQUEST
+// ========================================================
 
-    // ========================================================
-    // STREAMING REQUEST
-    // ========================================================
+if (stream) {
 
-    if (stream) {
+  try {
+
+    console.log('NVIDIA REQUEST START');
+
+    const response =
+      await axios({
+        method: 'POST',
+
+        url:
+          NVIDIA_API_BASE +
+          '/chat/completions',
+
+        headers: {
+          Authorization:
+            'Bearer ' +
+            NVIDIA_API_KEY,
+
+          'Content-Type':
+            'application/json',
+
+          Accept:
+            'text/event-stream'
+        },
+
+        data: nimRequest,
+
+        responseType: 'stream',
+
+        timeout: 180000,
+
+        validateStatus: () => true
+      });
+
+    console.log(
+      'NVIDIA status: ' +
+      response.status
+    );
+
+    console.log(
+      'NVIDIA HTTP response received.'
+    );
+
+
+    // ----------------------------------------------------
+    // NVIDIA ERROR
+    // ----------------------------------------------------
+
+    if (
+      response.status < 200 ||
+      response.status >= 300
+    ) {
+
+      let errorData = '';
+
+      response.data.on(
+        'data',
+        (chunk) => {
+
+          errorData +=
+            chunk.toString();
+        }
+      );
+
+      response.data.on(
+        'end',
+        () => {
+
+          console.error(
+            'NVIDIA streaming error: ' +
+            response.status +
+            ' ' +
+            errorData
+          );
+
+          if (!res.headersSent) {
+
+            res.status(
+              response.status
+            );
+
+            res.json({
+              error: {
+                message:
+                  errorData ||
+                  'NVIDIA API error',
+                type:
+                  'upstream_error'
+              }
+            });
+          }
+        }
+      );
+
+      return;
+    }
+
+
+    // ----------------------------------------------------
+    // JANITOR SSE HEADERS
+    // ----------------------------------------------------
+
+    res.status(200);
+
+    res.setHeader(
+      'Content-Type',
+      'text/event-stream; charset=utf-8'
+    );
+
+    res.setHeader(
+      'Cache-Control',
+      'no-cache, no-transform'
+    );
+
+    res.setHeader(
+      'Connection',
+      'keep-alive'
+    );
+
+    res.setHeader(
+      'X-Accel-Buffering',
+      'no'
+    );
+
+    res.flushHeaders();
+
+
+    // ----------------------------------------------------
+    // COMPLETION ID
+    // ----------------------------------------------------
+
+    const completionId =
+      'chatcmpl-' +
+      Date.now();
+
+
+    // ----------------------------------------------------
+    // STREAM STATE
+    // ----------------------------------------------------
+
+    let buffer = '';
+
+    let firstDataReceived = false;
+
+    let roleSent = false;
+
+    let finishSent = false;
+
+    let doneReceived = false;
+
+    let clientClosed = false;
+
+
+    // ----------------------------------------------------
+    // SEND INITIAL ASSISTANT ROLE
+    // ----------------------------------------------------
+
+    function sendAssistantRole() {
+
+      if (roleSent) {
+        return;
+      }
+
+      roleSent = true;
+
+      const roleChunk = {
+        id: completionId,
+        object: 'chat.completion.chunk',
+        created:
+          Math.floor(Date.now() / 1000),
+        model: nimModel,
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: 'assistant'
+            },
+            finish_reason: null
+          }
+        ]
+      };
+
+      sendSSE(
+        res,
+        roleChunk
+      );
+    }
+
+
+    // ----------------------------------------------------
+    // PROCESS ONE SSE EVENT
+    // ----------------------------------------------------
+
+    function processSSEEvent(event) {
+
+      if (!event) {
+        return;
+      }
+
+      const lines =
+        event.split(/\r?\n/);
+
+      const dataLines = [];
+
+      for (
+        const line of lines
+      ) {
+
+        if (
+          line.startsWith('data:')
+        ) {
+
+          dataLines.push(
+            line
+              .slice(5)
+              .trim()
+          );
+        }
+      }
+
+      if (
+        dataLines.length === 0
+      ) {
+        return;
+      }
+
+      const rawData =
+        dataLines.join('\n');
+
+
+      // --------------------------------------------------
+      // DONE
+      // --------------------------------------------------
+
+      if (
+        rawData === '[DONE]'
+      ) {
+
+        doneReceived = true;
+
+        return;
+      }
+
+
+      if (!rawData) {
+        return;
+      }
+
+
+      let parsed;
 
       try {
 
-        console.log(
-          'NVIDIA REQUEST START'
+        parsed =
+          JSON.parse(rawData);
+
+      } catch (error) {
+
+        console.error(
+          'Could not parse NVIDIA SSE JSON:',
+          rawData
         );
 
-        const response =
-          await axios({
-            method: 'POST',
+        return;
+      }
 
-            url:
-              NVIDIA_API_BASE +
-              '/chat/completions',
 
-            headers: {
-              Authorization:
-                'Bearer ' +
-                NVIDIA_API_KEY,
+      if (!firstDataReceived) {
 
-              'Content-Type':
-                'application/json',
-
-              Accept:
-                'text/event-stream'
-            },
-
-            data: nimRequest,
-
-            responseType: 'stream',
-
-            timeout: 180000,
-
-            validateStatus: () => true
-          });
-
+        firstDataReceived = true;
 
         console.log(
-          'NVIDIA HTTP response received.'
+          'First NVIDIA stream data received.'
         );
-
-        console.log(
-          'NVIDIA status: ' +
-          response.status
-        );
+      }
 
 
-        if (
-          response.status < 200 ||
-          response.status >= 300
-        ) {
+      // --------------------------------------------------
+      // CHOICE
+      // --------------------------------------------------
 
-          let errorData = '';
+      const choice =
+        parsed &&
+        Array.isArray(parsed.choices) &&
+        parsed.choices.length > 0
+          ? parsed.choices[0]
+          : null;
 
-          response.data.on(
-            'data',
-            (chunk) => {
-              errorData +=
-                chunk.toString();
-            }
+
+      if (!choice) {
+        return;
+      }
+
+
+      // --------------------------------------------------
+      // ROLE
+      // --------------------------------------------------
+
+      const delta =
+        choice.delta || {};
+
+
+      if (
+        delta.role === 'assistant' ||
+        !roleSent
+      ) {
+
+        sendAssistantRole();
+      }
+
+
+      // --------------------------------------------------
+      // CONTENT
+      // --------------------------------------------------
+
+      let content =
+        delta.content;
+
+
+      if (
+        content === undefined ||
+        content === null
+      ) {
+
+        content = '';
+      }
+
+
+      content =
+        extractText(content);
+
+
+      // --------------------------------------------------
+      // REASONING
+      // --------------------------------------------------
+
+      if (
+        !SHOW_REASONING &&
+        delta.reasoning_content
+      ) {
+
+        content = '';
+      }
+
+
+      // --------------------------------------------------
+      // FINISH REASON
+      // ----------------------------------------------------
+
+      const finishReason =
+        choice.finish_reason ||
+        null;
+
+
+      // --------------------------------------------------
+      // SEND CONTENT
+      // ----------------------------------------------------
+
+      if (content) {
+
+        const output =
+          makeChatChunk(
+            completionId,
+            nimModel,
+            content,
+            null
           );
 
-          response.data.on(
-            'end',
-            () => {
+        sendSSE(
+          res,
+          output
+        );
+      }
 
-              console.error(
-                'NVIDIA streaming error: ' +
-                response.status +
-                ' ' +
-                errorData
-              );
 
-              if (!res.headersSent) {
+      // --------------------------------------------------
+      // SEND FINISH
+      // ----------------------------------------------------
 
-                res.status(
-                  response.status
-                );
+      if (
+        finishReason &&
+        !finishSent
+      ) {
 
-                res.json({
-                  error: {
-                    message:
-                      errorData ||
-                      'NVIDIA API error',
-                    type:
-                      'upstream_error'
-                  }
-                });
-              }
+        finishSent = true;
+
+        const finishChunk = {
+          id: completionId,
+          object: 'chat.completion.chunk',
+          created:
+            Math.floor(Date.now() / 1000),
+          model: nimModel,
+          choices: [
+            {
+              index: 0,
+              delta: {},
+              finish_reason:
+                finishReason
             }
-          );
+          ]
+        };
 
+        sendSSE(
+          res,
+          finishChunk
+        );
+      }
+    }
+
+
+    // ----------------------------------------------------
+    // RECEIVE NVIDIA STREAM
+    // ----------------------------------------------------
+
+    response.data.on(
+      'data',
+      (chunk) => {
+
+        if (clientClosed) {
           return;
         }
 
 
+        buffer +=
+          chunk.toString('utf8');
+
+
+        // ------------------------------------------------
+        // NORMALIZE CRLF
+        // ------------------------------------------------
+
+        buffer =
+          buffer.replace(/\r\n/g, '\n');
+
+
+        // ------------------------------------------------
+        // PROCESS COMPLETE SSE EVENTS
+        // ------------------------------------------------
+
+        while (true) {
+
+          const separator =
+            buffer.indexOf('\n\n');
+
+
+          if (separator === -1) {
+            break;
+          }
+
+
+          const event =
+            buffer.slice(
+              0,
+              separator
+            );
+
+
+          buffer =
+            buffer.slice(
+              separator + 2
+            );
+
+
+          processSSEEvent(event);
+
+
+          if (doneReceived) {
+            break;
+          }
+        }
+      }
+    );
+
+
+    // ----------------------------------------------------
+    // STREAM END
+    // ----------------------------------------------------
+
+    response.data.on(
+      'end',
+      () => {
+
         console.log(
-          'NVIDIA streaming connection opened.'
+          'NVIDIA stream ended.'
         );
 
 
-        res.status(200);
-
-        res.setHeader(
-          'Content-Type',
-          'text/event-stream; charset=utf-8'
-        );
-
-        res.setHeader(
-          'Cache-Control',
-          'no-cache, no-transform'
-        );
-
-        res.setHeader(
-          'Connection',
-          'keep-alive'
-        );
-
-        res.setHeader(
-          'X-Accel-Buffering',
-          'no'
-        );
+        // ----------------------------------------------
+        // PROCESS REMAINING BUFFER
+        // ----------------------------------------------
 
         if (
-          typeof res.flushHeaders === 'function'
+          buffer.trim() &&
+          !doneReceived
         ) {
-          res.flushHeaders();
+
+          processSSEEvent(
+            buffer
+          );
+
+          buffer = '';
         }
 
 
-        const completionId =
-          'chatcmpl-' +
-          Date.now();
+        // ----------------------------------------------
+        // MAKE SURE ROLE EXISTS
+        // ----------------------------------------------
+
+        if (!roleSent) {
+          sendAssistantRole();
+        }
 
 
-        let buffer = '';
+        // ----------------------------------------------
+        // SEND FINAL STOP
+        // ----------------------------------------------
 
-        let firstDataReceived = false;
+        if (
+          !finishSent
+        ) {
 
-        let streamFinished = false;
+          finishSent = true;
 
-        let sentRole = false;
+          const finalChunk = {
+            id: completionId,
+            object: 'chat.completion.chunk',
+            created:
+              Math.floor(Date.now() / 1000),
+            model: nimModel,
+            choices: [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: 'stop'
+              }
+            ]
+          };
 
-        let sentFinish = false;
+          sendSSE(
+            res,
+            finalChunk
+          );
+        }
 
 
-        console.log(
-          'Waiting for NVIDIA HTTP response...'
+        // ----------------------------------------------
+        // OPENAI DONE
+        // ----------------------------------------------
+
+        if (
+          !res.writableEnded
+        ) {
+
+          res.write(
+            'data: [DONE]\n\n'
+          );
+
+          res.end();
+        }
+      }
+    );
+
+
+    // ----------------------------------------------------
+    // STREAM ERROR
+    // ----------------------------------------------------
+
+    response.data.on(
+      'error',
+      (error) => {
+
+        console.error(
+          'NVIDIA stream connection error:',
+          error
         );
 
+
+        if (
+          !res.writableEnded
+        ) {
+
+          res.end();
+        }
+      }
+    );
+
+
+    // ----------------------------------------------------
+    // CLIENT ABORTED
+    // ----------------------------------------------------
+
+    req.on(
+      'aborted',
+      () => {
+
+        clientClosed = true;
+
+        console.log(
+          'Janitor client aborted the request.'
+        );
+
+
+        if (
+          response.data &&
+          typeof response.data.destroy ===
+            'function'
+        ) {
+
+          response.data.destroy();
+        }
+      }
+    );
+
+
+  } catch (error) {
+
+    console.error(
+      'NVIDIA streaming request failed:',
+      error
+    );
+
+
+    if (!res.headersSent) {
+
+      return res.status(500).json({
+        error: {
+          message:
+            getNvidiaErrorMessage(
+              error
+            ),
+          type:
+            'upstream_error'
+        }
+      });
+    }
+
+
+    if (
+      !res.writableEnded
+    ) {
+
+      res.end();
+    }
+  }
+
+
+  return;
+}
 
         // ====================================================
         // SEND NORMAL CONTENT
