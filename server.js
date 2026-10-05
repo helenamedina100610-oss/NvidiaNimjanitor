@@ -22,88 +22,46 @@ const SHOW_REASONING =
 const REASONING_EFFORT =
   process.env.REASONING_EFFORT || 'max';
 
-
-// ============================================================
-// MIDDLEWARE
-// ============================================================
-
 app.use(cors());
 
-app.use(
-  express.json({
-    limit: '5mb'
-  })
-);
+app.use(express.json({
+  limit: '5mb'
+}));
 
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: '5mb'
-  })
-);
+app.use(express.urlencoded({
+  extended: true,
+  limit: '5mb'
+}));
 
-
-// ============================================================
-// REQUEST LOGGER
-// ============================================================
-
-app.use(
-  (req, res, next) => {
-    console.log(
-      new Date().toISOString() +
-      ' ' +
-      req.method +
-      ' ' +
-      req.path
-    );
-
-    next();
-  }
-);
-
-
-// ============================================================
-// MODEL MAPPING
-// ============================================================
+app.use((req, res, next) => {
+  console.log(
+    new Date().toISOString(),
+    req.method,
+    req.path
+  );
+  next();
+});
 
 const MODEL_MAPPING = {
+  'gpt-3.5-turbo': DEFAULT_MODEL,
+  'gpt-3.5-turbo-16k': DEFAULT_MODEL,
   'gpt-4': DEFAULT_MODEL,
+  'gpt-4-turbo': DEFAULT_MODEL,
+  'gpt-4-turbo-preview': DEFAULT_MODEL,
   'gpt-4o': DEFAULT_MODEL,
   'gpt-4o-mini': DEFAULT_MODEL,
   'gpt-4.1': DEFAULT_MODEL,
   'gpt-4.1-mini': DEFAULT_MODEL,
-  'gpt-5': DEFAULT_MODEL,
-  'gpt-5-mini': DEFAULT_MODEL,
-
-  'claude-3': DEFAULT_MODEL,
   'claude-3-opus': DEFAULT_MODEL,
   'claude-3-sonnet': DEFAULT_MODEL,
-  'claude-3-haiku': DEFAULT_MODEL,
   'claude-3.5-sonnet': DEFAULT_MODEL,
   'claude-3.7-sonnet': DEFAULT_MODEL,
-
   'gemini-pro': DEFAULT_MODEL,
-  'gemini-1.5-pro': DEFAULT_MODEL,
-  'gemini-2.0-flash': DEFAULT_MODEL,
-
-  'nemotron': DEFAULT_MODEL,
-  'nemotron-3-super': DEFAULT_MODEL,
-  'nemotron-3-ultra': DEFAULT_MODEL
+  'nemotron-3-ultra': DEFAULT_MODEL,
+  [DEFAULT_MODEL]: DEFAULT_MODEL
 };
 
-
-// ============================================================
-// MODEL RESOLVER
-// ============================================================
-
-function resolveModel(requestedModel) {
-
-  if (!requestedModel) {
-    return DEFAULT_MODEL;
-  }
-
-  const model = String(requestedModel).trim();
-
+function resolveModel(model) {
   if (!model) {
     return DEFAULT_MODEL;
   }
@@ -112,76 +70,41 @@ function resolveModel(requestedModel) {
     return model;
   }
 
-  if (model.includes('/')) {
-    return model;
-  }
-
   return MODEL_MAPPING[model] || DEFAULT_MODEL;
 }
 
-
-// ============================================================
-// MESSAGE NORMALIZER
-// ============================================================
-
 function normalizeMessages(messages) {
-
   if (!Array.isArray(messages)) {
     return [];
   }
 
-  return messages.map((message) => {
-
-    const normalized = {
-      role: message.role,
-      content: message.content
+  return messages.map(function (message) {
+    return {
+      role: message.role || 'user',
+      content: message.content == null
+        ? ''
+        : message.content
     };
-
-    if (message.name !== undefined) {
-      normalized.name = message.name;
-    }
-
-    if (message.tool_calls !== undefined) {
-      normalized.tool_calls = message.tool_calls;
-    }
-
-    if (message.tool_call_id !== undefined) {
-      normalized.tool_call_id = message.tool_call_id;
-    }
-
-    if (message.reasoning_content !== undefined) {
-      normalized.reasoning_content =
-        message.reasoning_content;
-    }
-
-    return normalized;
   });
 }
 
-
-// ============================================================
-// TEXT EXTRACTION
-// ============================================================
-
 function extractText(content) {
+  if (content == null) {
+    return '';
+  }
 
   if (typeof content === 'string') {
     return content;
   }
 
   if (Array.isArray(content)) {
-
     return content
-      .map((part) => {
-
+      .map(function (part) {
         if (typeof part === 'string') {
           return part;
         }
 
-        if (
-          part &&
-          typeof part.text === 'string'
-        ) {
+        if (part && typeof part.text === 'string') {
           return part.text;
         }
 
@@ -190,24 +113,20 @@ function extractText(content) {
       .join('');
   }
 
-  return '';
+  if (typeof content === 'object') {
+    if (typeof content.text === 'string') {
+      return content.text;
+    }
+
+    return '';
+  }
+
+  return String(content);
 }
 
-
-// ============================================================
-// SSE HELPER
-// ============================================================
-
 function sendSSE(res, payload) {
-
   if (typeof payload === 'string') {
-
-    res.write(
-      'data: ' +
-      payload +
-      '\n\n'
-    );
-
+    res.write('data: ' + payload + '\n\n');
     return;
   }
 
@@ -218,19 +137,13 @@ function sendSSE(res, payload) {
   );
 }
 
-
-// ============================================================
-// CHAT COMPLETION CHUNK
-// ============================================================
-
 function makeChatChunk(
   id,
   model,
   content,
-  finishReason = null,
-  includeRole = false
+  finishReason,
+  includeRole
 ) {
-
   const delta = {};
 
   if (includeRole) {
@@ -242,74 +155,51 @@ function makeChatChunk(
   }
 
   return {
-    id,
+    id: id,
     object: 'chat.completion.chunk',
     created: Math.floor(Date.now() / 1000),
-    model,
+    model: model,
     choices: [
       {
         index: 0,
-        delta,
-        finish_reason: finishReason
+        delta: delta,
+        finish_reason: finishReason || null
       }
     ]
   };
 }
 
+function getNvidiaErrorMessage(data) {
+  if (!data) {
+    return 'Unknown NVIDIA error';
+  }
 
-// ============================================================
-// NVIDIA ERROR HANDLER
-// ============================================================
+  if (typeof data === 'string') {
+    return data;
+  }
 
-function getNvidiaErrorMessage(error) {
-
-  if (
-    error &&
-    error.response &&
-    error.response.data
-  ) {
-
-    const data = error.response.data;
-
-    if (typeof data === 'string') {
-      return data;
+  if (data.error) {
+    if (typeof data.error === 'string') {
+      return data.error;
     }
 
-    if (
-      data.error &&
-      typeof data.error.message === 'string'
-    ) {
+    if (data.error.message) {
       return data.error.message;
     }
-
-    if (typeof data.detail === 'string') {
-      return data.detail;
-    }
-
-    try {
-      return JSON.stringify(data);
-    } catch {
-      return 'Unknown NVIDIA API error';
-    }
   }
 
-  if (
-    error &&
-    typeof error.message === 'string'
-  ) {
-    return error.message;
+  if (data.message) {
+    return data.message;
   }
 
-  return 'Unknown NVIDIA API error';
+  try {
+    return JSON.stringify(data);
+  } catch (error) {
+    return 'Unknown NVIDIA error';
+  }
 }
 
-
-// ============================================================
-// ROOT
-// ============================================================
-
-app.get('/', (req, res) => {
-
+app.get('/', function (req, res) {
   res.json({
     status: 'ok',
     service: 'OpenAI to NVIDIA NIM Proxy',
@@ -317,13 +207,7 @@ app.get('/', (req, res) => {
   });
 });
 
-
-// ============================================================
-// HEALTH
-// ============================================================
-
-app.get('/health', (req, res) => {
-
+app.get('/health', function (req, res) {
   res.json({
     status: 'ok',
     service: 'OpenAI to NVIDIA NIM Proxy',
@@ -334,9 +218,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-
-app.get('/health/', (req, res) => {
-
+app.get('/health/', function (req, res) {
   res.json({
     status: 'ok',
     service: 'OpenAI to NVIDIA NIM Proxy',
@@ -347,1091 +229,407 @@ app.get('/health/', (req, res) => {
   });
 });
 
+app.get('/v1/models', function (req, res) {
+  const aliases = Object.keys(MODEL_MAPPING);
 
-// ============================================================
-// OPENAI MODELS ENDPOINT
-// ============================================================
-
-app.get('/v1/models', (req, res) => {
-
-  const models = [
-    'gpt-4',
-    'gpt-4o',
-    'gpt-4o-mini',
-    'gpt-4.1',
-    'gpt-4.1-mini',
-    'claude-3',
-    'claude-3.5-sonnet',
-    'gemini-pro',
-    DEFAULT_MODEL
-  ];
-
-  const uniqueModels = [
-    ...new Set(models)
-  ];
-
-  res.json({
-    object: 'list',
-    data: uniqueModels.map((model) => ({
-      id: model,
+  const data = aliases.map(function (id) {
+    return {
+      id: id,
       object: 'model',
       created: Math.floor(Date.now() / 1000),
       owned_by: 'nvidia-nim'
-    }))
+    };
+  });
+
+  if (!aliases.includes(DEFAULT_MODEL)) {
+    data.push({
+      id: DEFAULT_MODEL,
+      object: 'model',
+      created: Math.floor(Date.now() / 1000),
+      owned_by: 'nvidia-nim'
+    });
+  }
+
+  res.json({
+    object: 'list',
+    data: data
   });
 });
 
-
-// ============================================================
-// CHAT COMPLETIONS
-// ============================================================
-
-app.post(
-  '/v1/chat/completions',
-  async (req, res) => {
-
-    console.log(
-      'Received chat completion request.'
-    );
-
-
-    // --------------------------------------------------------
-    // API KEY CHECK
-    // --------------------------------------------------------
-
-    if (!NVIDIA_API_KEY) {
-
-      console.error(
-        'NVIDIA_API_KEY is not configured.'
-      );
-
-      return res.status(500).json({
-        error: {
-          message:
-            'NVIDIA_API_KEY is not configured.',
-          type: 'server_error'
-        }
-      });
-    }
-
-
-    // --------------------------------------------------------
-    // REQUEST BODY
-    // --------------------------------------------------------
-
-    const body = req.body || {};
-
-
-    if (
-      !body.messages ||
-      !Array.isArray(body.messages) ||
-      body.messages.length === 0
-    ) {
-
-      return res.status(400).json({
-        error: {
-          message:
-            'messages is required and must be a non-empty array.',
-          type: 'invalid_request_error'
-        }
-      });
-    }
-
-
-    // --------------------------------------------------------
-    // MODEL
-    // --------------------------------------------------------
-
-    const requestedModel =
-      body.model || 'gpt-4o';
-
-    const nimModel =
-      resolveModel(requestedModel);
-
-
-    console.log(
-      'Model requested: ' +
-      requestedModel +
-      ' -> NVIDIA: ' +
-      nimModel
-    );
-
-
-    // --------------------------------------------------------
-    // MESSAGES
-    // --------------------------------------------------------
-
-    const messages =
-      normalizeMessages(body.messages);
-
-
-    // --------------------------------------------------------
-    // TEMPERATURE
-    // --------------------------------------------------------
-
-    const temperature =
-      typeof body.temperature === 'number'
-        ? body.temperature
-        : 1.0;
-
-
-    // --------------------------------------------------------
-    // MAX TOKENS
-    // --------------------------------------------------------
-
-    const maxTokens =
-      typeof body.max_tokens === 'number'
-        ? body.max_tokens
-        : typeof body.max_completion_tokens === 'number'
-          ? body.max_completion_tokens
-          : 16384;
-
-
-    // --------------------------------------------------------
-    // STREAM
-    // --------------------------------------------------------
-
-    const stream =
-      Boolean(body.stream);
-
-
-    // --------------------------------------------------------
-    // NVIDIA REQUEST
-    // --------------------------------------------------------
-
-    const nimRequest = {
-      model: nimModel,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-      stream,
-      reasoning_effort: REASONING_EFFORT
-    };
-
-
-    // --------------------------------------------------------
-    // OPTIONAL SEED
-    // --------------------------------------------------------
-
-    if (body.seed !== undefined) {
-      nimRequest.seed = body.seed;
-    }
-
-
-    // --------------------------------------------------------
-    // OPTIONAL STREAM OPTIONS
-    // --------------------------------------------------------
-
-    if (
-      body.stream_options !== undefined
-    ) {
-      nimRequest.stream_options =
-        body.stream_options;
-    }
-
-
-    console.log(
-      'Sending request to NVIDIA: ' +
-      NVIDIA_API_BASE +
-      '/chat/completions'
-    );
-
-
-    // ========================================================
-    // STREAMING REQUEST
-    // ========================================================
-
-    if (stream) {
-
-      try {
-
-        console.log(
-          'NVIDIA REQUEST START'
-        );
-
-
-        const response =
-          await axios({
-            method: 'POST',
-
-            url:
-              NVIDIA_API_BASE +
-              '/chat/completions',
-
-            headers: {
-              Authorization:
-                'Bearer ' +
-                NVIDIA_API_KEY,
-
-              'Content-Type':
-                'application/json',
-
-              Accept:
-                'text/event-stream'
-            },
-
-            data: nimRequest,
-
-            responseType: 'stream',
-
-            timeout: 180000,
-
-            validateStatus: () => true
-          });
-
-
-        console.log(
-          'NVIDIA status: ' +
-          response.status
-        );
-
-        console.log(
-          'NVIDIA HTTP response received.'
-        );
-
-
-        // ----------------------------------------------------
-        // NVIDIA ERROR
-        // ----------------------------------------------------
-
-        if (
-          response.status < 200 ||
-          response.status >= 300
-        ) {
-
-          let errorData = '';
-
-          response.data.on(
-            'data',
-            (chunk) => {
-
-              errorData +=
-                chunk.toString();
-            }
-          );
-
-          response.data.on(
-            'end',
-            () => {
-
-              console.error(
-                'NVIDIA streaming error: ' +
-                response.status +
-                ' ' +
-                errorData
-              );
-
-              if (!res.headersSent) {
-
-                res.status(
-                  response.status
-                );
-
-                res.json({
-                  error: {
-                    message:
-                      errorData ||
-                      'NVIDIA API error',
-                    type:
-                      'upstream_error'
-                  }
-                });
-              }
-            }
-          );
-
-          return;
-        }
-
-
-        // ----------------------------------------------------
-        // JANITOR SSE HEADERS
-        // ----------------------------------------------------
-
-        res.status(200);
-
-        res.setHeader(
-          'Content-Type',
-          'text/event-stream; charset=utf-8'
-        );
-
-        res.setHeader(
-          'Cache-Control',
-          'no-cache, no-transform'
-        );
-
-        res.setHeader(
-          'Connection',
-          'keep-alive'
-        );
-
-        res.setHeader(
-          'X-Accel-Buffering',
-          'no'
-        );
-
-        res.flushHeaders();
-
-
-        // ----------------------------------------------------
-        // COMPLETION ID
-        // ----------------------------------------------------
-
-        const completionId =
-          'chatcmpl-' +
-          Date.now();
-
-
-        // ----------------------------------------------------
-        // STREAM STATE
-        // ----------------------------------------------------
-
-        let buffer = '';
-
-        let firstDataReceived = false;
-
-        let roleSent = false;
-
-        let finishSent = false;
-
-        let doneReceived = false;
-
-        let streamFinished = false;
-
-        let clientClosed = false;
-
-
-        // ----------------------------------------------------
-        // SEND ASSISTANT ROLE
-        // ----------------------------------------------------
-
-        function sendAssistantRole() {
-
-          if (
-            roleSent ||
-            res.writableEnded
-          ) {
-            return;
-          }
-
-          roleSent = true;
-
-          const roleChunk =
-            makeChatChunk(
-              completionId,
-              nimModel,
-              '',
-              null,
-              true
-            );
-
-          sendSSE(
-            res,
-            roleChunk
-          );
-        }
-
-
-        // ----------------------------------------------------
-        // SEND FINISH
-        // ----------------------------------------------------
-
-        function sendFinish(reason) {
-
-          if (
-            finishSent ||
-            res.writableEnded
-          ) {
-            return;
-          }
-
-          finishSent = true;
-
-          const finishChunk =
-            makeChatChunk(
-              completionId,
-              nimModel,
-              '',
-              reason || 'stop',
-              false
-            );
-
-          sendSSE(
-            res,
-            finishChunk
-          );
-        }
-
-
-        // ----------------------------------------------------
-        // PROCESS ONE SSE EVENT
-        // ----------------------------------------------------
-
-        function processSSEEvent(event) {
-
-          if (
-            !event ||
-            doneReceived ||
-            clientClosed
-          ) {
-            return;
-          }
-
-
-          const lines =
-            event.split(/\r?\n/);
-
-
-          const dataLines = [];
-
-
-          for (
-            const rawLine of lines
-          ) {
-
-            if (
-              rawLine.startsWith('data:')
-            ) {
-
-              dataLines.push(
-                rawLine
-                  .slice(5)
-                  .trim()
-              );
-            }
-          }
-
-
-          if (
-            dataLines.length === 0
-          ) {
-            return;
-          }
-
-
-          const rawData =
-            dataLines.join('\n');
-
-
-          // --------------------------------------------------
-          // DONE
-          // --------------------------------------------------
-
-          if (
-            rawData === '[DONE]'
-          ) {
-
-            doneReceived = true;
-
-            return;
-          }
-
-
-          if (!rawData) {
-            return;
-          }
-
-
-          let parsed;
-
-          try {
-
-            parsed =
-              JSON.parse(rawData);
-
-          } catch (error) {
-
-            console.error(
-              'Could not parse NVIDIA SSE JSON:',
-              rawData
-            );
-
-            return;
-          }
-
-
-          if (!firstDataReceived) {
-
-            firstDataReceived = true;
-
-            console.log(
-              'First NVIDIA stream data received.'
-            );
-          }
-
-
-          // --------------------------------------------------
-          // CHOICE
-          // --------------------------------------------------
-
-          const choice =
-            parsed &&
-            Array.isArray(parsed.choices) &&
-            parsed.choices.length > 0
-              ? parsed.choices[0]
-              : null;
-
-
-          if (!choice) {
-            return;
-          }
-
-
-          // --------------------------------------------------
-          // DELTA
-          // --------------------------------------------------
-
-          const delta =
-            choice.delta || {};
-
-
-          // --------------------------------------------------
-          // ROLE
-          // --------------------------------------------------
-
-          if (
-            delta.role === 'assistant' ||
-            !roleSent
-          ) {
-
-            sendAssistantRole();
-          }
-
-
-          // --------------------------------------------------
-          // REASONING
-          // --------------------------------------------------
-
-          let content = '';
-
-          if (
-            SHOW_REASONING &&
-            delta.reasoning_content
-          ) {
-
-            content =
-              extractText(
-                delta.reasoning_content
-              );
-          }
-
-
-          // --------------------------------------------------
-          // NORMAL CONTENT
-          // --------------------------------------------------
-
-          if (delta.content) {
-
-            content +=
-              extractText(
-                delta.content
-              );
-          }
-
-
-          // --------------------------------------------------
-          // SEND CONTENT
-          // --------------------------------------------------
-
-          if (content) {
-
-            const output =
-              makeChatChunk(
-                completionId,
-                nimModel,
-                content,
-                null,
-                false
-              );
-
-            sendSSE(
-              res,
-              output
-            );
-          }
-
-
-          // --------------------------------------------------
-          // FINISH REASON
-          // --------------------------------------------------
-
-          if (
-            choice.finish_reason &&
-            !finishSent
-          ) {
-
-            sendFinish(
-              choice.finish_reason
-            );
-          }
-        }
-
-
-        // ----------------------------------------------------
-        // RECEIVE NVIDIA STREAM
-        // ----------------------------------------------------
-
-        response.data.on(
-          'data',
-          (chunk) => {
-
-            if (
-              clientClosed ||
-              streamFinished
-            ) {
-              return;
-            }
-
-
-            buffer +=
-              chunk.toString('utf8');
-
-
-            // Support both LF and CRLF.
-            buffer =
-              buffer.replace(
-                /\r\n/g,
-                '\n'
-              );
-
-
-            // ------------------------------------------------
-            // PROCESS COMPLETE SSE EVENTS
-            // ------------------------------------------------
-
-            while (true) {
-
-              const separator =
-                buffer.indexOf('\n\n');
-
-
-              if (
-                separator === -1
-              ) {
-                break;
-              }
-
-
-              const event =
-                buffer.slice(
-                  0,
-                  separator
-                );
-
-
-              buffer =
-                buffer.slice(
-                  separator + 2
-                );
-
-
-              processSSEEvent(
-                event
-              );
-
-
-              if (
-                doneReceived
-              ) {
-                break;
-              }
-            }
-          }
-        );
-
-
-        // ----------------------------------------------------
-        // STREAM END
-        // ----------------------------------------------------
-
-        response.data.on(
-          'end',
-          () => {
-
-            if (
-              streamFinished
-            ) {
-              return;
-            }
-
-
-            streamFinished = true;
-
-
-            console.log(
-              'NVIDIA stream ended.'
-            );
-
-
-            // ------------------------------------------------
-            // PROCESS REMAINING BUFFER
-            // ------------------------------------------------
-
-            if (
-              buffer.trim() &&
-              !doneReceived
-            ) {
-
-              processSSEEvent(
-                buffer
-              );
-
-              buffer = '';
-            }
-
-
-            // ------------------------------------------------
-            // ENSURE ROLE
-            // ------------------------------------------------
-
-            if (
-              !roleSent &&
-              !res.writableEnded
-            ) {
-
-              sendAssistantRole();
-            }
-
-
-            // ------------------------------------------------
-            // SEND FINAL STOP
-            // ------------------------------------------------
-
-            if (
-              !finishSent &&
-              !res.writableEnded
-            ) {
-
-              sendFinish('stop');
-            }
-
-
-            // ------------------------------------------------
-            // OPENAI DONE
-            // ------------------------------------------------
-
-            if (
-              !res.writableEnded
-            ) {
-
-              sendSSE(
-                res,
-                '[DONE]'
-              );
-
-              res.end();
-            }
-          }
-        );
-
-
-        // ----------------------------------------------------
-        // STREAM ERROR
-        // ----------------------------------------------------
-
-        response.data.on(
-          'error',
-          (error) => {
-
-            if (
-              streamFinished
-            ) {
-              return;
-            }
-
-
-            streamFinished = true;
-
-
-            console.error(
-              'NVIDIA stream connection error:',
-              error
-            );
-
-
-            if (
-              !res.writableEnded
-            ) {
-
-              res.end();
-            }
-          }
-        );
-
-
-        // ----------------------------------------------------
-        // CLIENT ABORTED
-        // ----------------------------------------------------
-
-        req.on(
-          'aborted',
-          () => {
-
-            clientClosed = true;
-
-            console.log(
-              'Janitor client aborted the request.'
-            );
-
-
-            if (
-              response.data &&
-              typeof response.data.destroy ===
-                'function'
-            ) {
-
-              response.data.destroy();
-            }
-          }
-        );
-
-
-      } catch (error) {
-
-        console.error(
-          'NVIDIA streaming request failed:',
-          error
-        );
-
-
-        if (
-          !res.headersSent
-        ) {
-
-          return res.status(500).json({
-            error: {
-              message:
-                getNvidiaErrorMessage(
-                  error
-                ),
-              type:
-                'upstream_error'
-            }
-          });
-        }
-
-
-        if (
-          !res.writableEnded
-        ) {
-
-          res.end();
-        }
-      }
-
-
-      return;
-    }
-
-
-    // ========================================================
-    // NON-STREAMING REQUEST
-    // ========================================================
-
-    try {
-
-      const response =
-        await axios({
-          method: 'POST',
-
-          url:
-            NVIDIA_API_BASE +
-            '/chat/completions',
-
-          headers: {
-            Authorization:
-              'Bearer ' +
-              NVIDIA_API_KEY,
-
-            'Content-Type':
-              'application/json',
-
-            Accept:
-              'application/json'
-          },
-
-          data: nimRequest,
-
-          timeout: 180000,
-
-          validateStatus: () => true
-        });
-
-
-      if (
-        response.status < 200 ||
-        response.status >= 300
-      ) {
-
-        console.error(
-          'NVIDIA API error: ' +
-          response.status,
-          response.data
-        );
-
-
-        return res
-          .status(response.status)
-          .json(
-            response.data || {
-              error: {
-                message:
-                  'NVIDIA API error',
-                type:
-                  'upstream_error'
-              }
-            }
-          );
-      }
-
-
-      const data =
-        response.data;
-
-
-      if (
-        !SHOW_REASONING &&
-        data &&
-        data.choices
-      ) {
-
-        data.choices =
-          data.choices.map(
-            (choice) => {
-
-              if (
-                choice &&
-                choice.message
-              ) {
-
-                const message =
-                  choice.message;
-
-
-                if (
-                  message.reasoning_content
-                ) {
-
-                  delete
-                    message.reasoning_content;
-                }
-              }
-
-
-              return choice;
-            }
-          );
-      }
-
-
-      return res
-        .status(200)
-        .json(data);
-
-
-    } catch (error) {
-
-      console.error(
-        'NVIDIA request failed:',
-        error
-      );
-
-
-      return res.status(500).json({
-        error: {
-          message:
-            getNvidiaErrorMessage(
-              error
-            ),
-          type:
-            'upstream_error'
-        }
-      });
-    }
-  }
-);
-
-
-// ============================================================
-// 404
-// ============================================================
-
-app.use(
-  (req, res) => {
-
-    res.status(404).json({
+app.post('/v1/chat/completions', async function (req, res) {
+  console.log('NVIDIA REQUEST START');
+
+  if (!NVIDIA_API_KEY) {
+    return res.status(500).json({
       error: {
-        message:
-          'Endpoint not found.',
-        type:
-          'not_found'
+        message: 'NVIDIA_API_KEY is not configured',
+        type: 'configuration_error'
       }
     });
   }
-);
 
+  const body = req.body || {};
 
-// ============================================================
-// START SERVER
-// ============================================================
-
-app.listen(
-  PORT,
-  '0.0.0.0',
-  () => {
-
-    console.log(
-      '=================================================='
-    );
-
-    console.log(
-      'OpenAI to NVIDIA NIM Proxy'
-    );
-
-    console.log(
-      '=================================================='
-    );
-
-    console.log(
-      'Server listening on port ' +
-      PORT
-    );
-
-    console.log(
-      'NVIDIA API: ' +
-      NVIDIA_API_BASE
-    );
-
-    console.log(
-      'Default model: ' +
-      DEFAULT_MODEL
-    );
-
-    console.log(
-      'Temperature default: 1.0'
-    );
-
-    console.log(
-      'Max tokens default: 16384'
-    );
-
-    console.log(
-      'Reasoning effort: ' +
-      REASONING_EFFORT
-    );
-
-    console.log(
-      'Reasoning display: ' +
-      SHOW_REASONING
-    );
-
-    console.log(
-      'NVIDIA API configured: ' +
-      Boolean(NVIDIA_API_KEY)
-    );
-
-    console.log(
-      '=================================================='
-    );
+  if (!Array.isArray(body.messages) || body.messages.length === 0) {
+    return res.status(400).json({
+      error: {
+        message: 'messages is required',
+        type: 'invalid_request_error'
+      }
+    });
   }
-);
+
+  const requestedModel = body.model || 'gpt-4o';
+  const nimModel = resolveModel(requestedModel);
+
+  const messages = normalizeMessages(body.messages);
+
+  const temperature =
+    body.temperature !== undefined
+      ? body.temperature
+      : 1.0;
+
+  const maxTokens =
+    body.max_tokens !== undefined
+      ? body.max_tokens
+      : (
+          body.max_completion_tokens !== undefined
+            ? body.max_completion_tokens
+            : 16384
+        );
+
+  const stream = Boolean(body.stream);
+
+  console.log(
+    'Model requested:',
+    requestedModel,
+    '-> NVIDIA:',
+    nimModel
+  );
+
+  console.log(
+    'Temperature:',
+    temperature
+  );
+
+  console.log(
+    'Max tokens:',
+    maxTokens
+  );
+
+  console.log(
+    'Stream requested:',
+    stream
+  );
+
+  const nimRequest = {
+    model: nimModel,
+    messages: messages,
+    temperature: temperature,
+    max_tokens: maxTokens,
+    stream: false,
+    reasoning_effort: REASONING_EFFORT
+  };
+
+  if (body.seed !== undefined) {
+    nimRequest.seed = body.seed;
+  }
+
+  if (body.top_p !== undefined) {
+    nimRequest.top_p = body.top_p;
+  }
+
+  if (body.presence_penalty !== undefined) {
+    nimRequest.presence_penalty = body.presence_penalty;
+  }
+
+  if (body.frequency_penalty !== undefined) {
+    nimRequest.frequency_penalty = body.frequency_penalty;
+  }
+
+  if (body.stop !== undefined) {
+    nimRequest.stop = body.stop;
+  }
+
+  try {
+    console.log(
+      'Sending request to NVIDIA:',
+      NVIDIA_API_BASE + '/chat/completions'
+    );
+
+    /*
+     * IMPORTANTE:
+     *
+     * Mesmo quando o Janitor pede stream=true,
+     * nós pedimos uma resposta completa para a NVIDIA.
+     *
+     * Depois transformamos essa resposta em um
+     * SSE compatível com o Janitor.
+     *
+     * Isso evita problemas com o streaming da NVIDIA.
+     */
+
+    const response = await axios({
+      method: 'POST',
+      url: NVIDIA_API_BASE + '/chat/completions',
+      headers: {
+        Authorization: 'Bearer ' + NVIDIA_API_KEY,
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      },
+      data: nimRequest,
+      timeout: 180000,
+      validateStatus: function () {
+        return true;
+      }
+    });
+
+    console.log(
+      'NVIDIA status:',
+      response.status
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+      const errorMessage =
+        getNvidiaErrorMessage(response.data);
+
+      console.error(
+        'NVIDIA ERROR:',
+        response.status,
+        errorMessage
+      );
+
+      return res.status(response.status).json({
+        error: {
+          message: errorMessage,
+          type: 'upstream_error',
+          code: response.status
+        }
+      });
+    }
+
+    const data = response.data;
+
+    if (
+      !data ||
+      !Array.isArray(data.choices) ||
+      !data.choices[0]
+    ) {
+      console.error(
+        'NVIDIA returned an invalid response:',
+        JSON.stringify(data)
+      );
+
+      return res.status(502).json({
+        error: {
+          message: 'Invalid response from NVIDIA',
+          type: 'upstream_error'
+        }
+      });
+    }
+
+    const choice = data.choices[0];
+    const message = choice.message || {};
+
+    let content = extractText(message.content);
+
+    console.log(
+      'NVIDIA content length:',
+      content.length
+    );
+
+    if (!content && SHOW_REASONING) {
+      content = extractText(
+        message.reasoning_content
+      );
+    }
+
+    if (!content) {
+      console.error(
+        'NVIDIA returned no visible content.'
+      );
+
+      return res.status(502).json({
+        error: {
+          message: 'NVIDIA returned no visible content',
+          type: 'upstream_error'
+        }
+      });
+    }
+
+    const completionId =
+      data.id ||
+      'chatcmpl-' +
+      Date.now();
+
+    const model =
+      data.model ||
+      nimModel;
+
+    const finishReason =
+      choice.finish_reason ||
+      'stop';
+
+    if (!stream) {
+      const result = {
+        id: completionId,
+        object: 'chat.completion',
+        created:
+          data.created ||
+          Math.floor(Date.now() / 1000),
+        model: model,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: content
+            },
+            finish_reason: finishReason
+          }
+        ]
+      };
+
+      if (data.usage) {
+        result.usage = data.usage;
+      }
+
+      return res.json(result);
+    }
+
+    /*
+     * JANITOR PEDIU STREAMING.
+     *
+     * Vamos entregar a resposta completa como
+     * uma sequência SSE simples e compatível.
+     */
+
+    res.status(200);
+
+    res.setHeader(
+      'Content-Type',
+      'text/event-stream; charset=utf-8'
+    );
+
+    res.setHeader(
+      'Cache-Control',
+      'no-cache, no-transform'
+    );
+
+    res.setHeader(
+      'Connection',
+      'keep-alive'
+    );
+
+    res.setHeader(
+      'X-Accel-Buffering',
+      'no'
+    );
+
+    if (typeof res.flushHeaders === 'function') {
+      res.flushHeaders();
+    }
+
+    sendSSE(
+      res,
+      makeChatChunk(
+        completionId,
+        model,
+        '',
+        null,
+        true
+      )
+    );
+
+    sendSSE(
+      res,
+      makeChatChunk(
+        completionId,
+        model,
+        content,
+        null,
+        false
+      )
+    );
+
+    sendSSE(
+      res,
+      makeChatChunk(
+        completionId,
+        model,
+        '',
+        finishReason,
+        false
+      )
+    );
+
+    sendSSE(res, '[DONE]');
+
+    res.end();
+
+    console.log(
+      'Response successfully sent to Janitor.'
+    );
+
+  } catch (error) {
+    console.error(
+      'PROXY ERROR:',
+      error.message
+    );
+
+    if (error.response) {
+      console.error(
+        'NVIDIA response:',
+        error.response.status,
+        error.response.data
+      );
+    }
+
+    if (!res.headersSent) {
+      return res.status(502).json({
+        error: {
+          message:
+            error.message ||
+            'Upstream NVIDIA request failed',
+          type: 'upstream_error'
+        }
+      });
+    }
+
+    try {
+      res.end();
+    } catch (endError) {
+      console.error(
+        'Error ending response:',
+        endError.message
+      );
+    }
+  }
+});
+
+app.use(function (req, res) {
+  res.status(404).json({
+    error: {
+      message: 'Not found',
+      type: 'not_found'
+    }
+  });
+});
+
+app.listen(PORT, function () {
+  console.log('==========================================');
+  console.log('OpenAI to NVIDIA NIM Proxy');
+  console.log('==========================================');
+  console.log('Server listening on port ' + PORT);
+  console.log('NVIDIA API: ' + NVIDIA_API_BASE);
+  console.log('Default model: ' + DEFAULT_MODEL);
+  console.log('Reasoning effort: ' + REASONING_EFFORT);
+  console.log('Reasoning display: ' + SHOW_REASONING);
+  console.log('Max tokens default: 16384');
+  console.log('Temperature default: 1.0');
+  console.log(
+    'NVIDIA API configured: ' +
+    Boolean(NVIDIA_API_KEY)
+  );
+  console.log('==========================================');
+});
