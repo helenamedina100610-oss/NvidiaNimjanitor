@@ -1,3 +1,4 @@
+```javascript
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -467,10 +468,6 @@ app.post(
     // --------------------------------------------------------
     // NVIDIA REQUEST
     // --------------------------------------------------------
-    // IMPORTANTE:
-    // Não usamos extra_body.
-    // Não usamos chat_template_kwargs.
-    // --------------------------------------------------------
 
     const nimRequest = {
       model: nimModel,
@@ -482,18 +479,10 @@ app.post(
     };
 
 
-    // --------------------------------------------------------
-    // OPTIONAL SEED
-    // --------------------------------------------------------
-
     if (body.seed !== undefined) {
       nimRequest.seed = body.seed;
     }
 
-
-    // --------------------------------------------------------
-    // OPTIONAL STREAM OPTIONS
-    // --------------------------------------------------------
 
     if (
       body.stream_options !== undefined
@@ -504,9 +493,41 @@ app.post(
 
 
     console.log(
-      'Sending request to NVIDIA: ' +
+      '=================================================='
+    );
+
+    console.log(
+      'NVIDIA REQUEST START'
+    );
+
+    console.log(
+      'URL: ' +
       NVIDIA_API_BASE +
       '/chat/completions'
+    );
+
+    console.log(
+      'Model: ' +
+      nimModel
+    );
+
+    console.log(
+      'Stream: ' +
+      stream
+    );
+
+    console.log(
+      'Temperature: ' +
+      temperature
+    );
+
+    console.log(
+      'Max tokens: ' +
+      maxTokens
+    );
+
+    console.log(
+      'Sending request to NVIDIA now...'
     );
 
 
@@ -517,6 +538,10 @@ app.post(
     if (stream) {
 
       try {
+
+        console.log(
+          'Waiting for NVIDIA HTTP response...'
+        );
 
         const response =
           await axios({
@@ -542,10 +567,20 @@ app.post(
 
             responseType: 'stream',
 
-            timeout: 180000,
+            timeout: 60000,
 
             validateStatus: () => true
           });
+
+
+        console.log(
+          'NVIDIA HTTP response received.'
+        );
+
+        console.log(
+          'NVIDIA status: ' +
+          response.status
+        );
 
 
         if (
@@ -598,6 +633,10 @@ app.post(
         }
 
 
+        console.log(
+          'NVIDIA streaming connection opened.'
+        );
+
         res.status(200);
 
         res.setHeader(
@@ -625,10 +664,21 @@ app.post(
 
         let buffer = '';
 
+        let receivedFirstChunk = false;
+
 
         response.data.on(
           'data',
           (chunk) => {
+
+            if (!receivedFirstChunk) {
+
+              receivedFirstChunk = true;
+
+              console.log(
+                'First NVIDIA stream data received.'
+              );
+            }
 
             buffer +=
               chunk.toString();
@@ -685,6 +735,10 @@ app.post(
                     );
 
                 } catch {
+
+                  console.log(
+                    'Received non-JSON NVIDIA SSE data.'
+                  );
 
                   continue;
                 }
@@ -745,6 +799,10 @@ app.post(
           'end',
           () => {
 
+            console.log(
+              'NVIDIA stream ended.'
+            );
+
             sendSSE(
               res,
               makeChatChunk(
@@ -784,6 +842,10 @@ app.post(
           'close',
           () => {
 
+            console.log(
+              'Janitor connection closed.'
+            );
+
             if (
               response.data &&
               typeof response.data.destroy ===
@@ -799,7 +861,16 @@ app.post(
       } catch (error) {
 
         console.error(
-          'NVIDIA streaming request failed:',
+          'NVIDIA streaming request failed.'
+        );
+
+        console.error(
+          'Error message: ' +
+          getNvidiaErrorMessage(error)
+        );
+
+        console.error(
+          'Full error:',
           error
         );
 
@@ -835,6 +906,10 @@ app.post(
 
     try {
 
+      console.log(
+        'Sending non-streaming request to NVIDIA...'
+      );
+
       const response =
         await axios({
           method: 'POST',
@@ -857,10 +932,20 @@ app.post(
 
           data: nimRequest,
 
-          timeout: 180000,
+          timeout: 60000,
 
           validateStatus: () => true
         });
+
+
+      console.log(
+        'NVIDIA HTTP response received.'
+      );
+
+      console.log(
+        'NVIDIA status: ' +
+        response.status
+      );
 
 
       if (
@@ -869,8 +954,7 @@ app.post(
       ) {
 
         console.error(
-          'NVIDIA API error: ' +
-          response.status,
+          'NVIDIA API error:',
           response.data
         );
 
@@ -911,7 +995,6 @@ app.post(
                 const message =
                   choice.message;
 
-
                 if (
                   message.reasoning_content
                 ) {
@@ -920,7 +1003,6 @@ app.post(
                     message.reasoning_content;
                 }
               }
-
 
               return choice;
             }
@@ -936,7 +1018,16 @@ app.post(
     } catch (error) {
 
       console.error(
-        'NVIDIA request failed:',
+        'NVIDIA request failed.'
+      );
+
+      console.error(
+        'Error message: ' +
+        getNvidiaErrorMessage(error)
+      );
+
+      console.error(
+        'Full error:',
         error
       );
 
@@ -1039,3 +1130,4 @@ app.listen(
     );
   }
 );
+```
