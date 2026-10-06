@@ -19,7 +19,7 @@ const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
 
 const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL ||
-  "nvidia/nemotron-3.5-lightning-30b-a3b";
+  "moonshotai/kimi-k2.6";
 
 const DEFAULT_TEMPERATURE = 1.0;
 const DEFAULT_MAX_TOKENS = 16384;
