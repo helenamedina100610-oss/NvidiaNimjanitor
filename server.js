@@ -33,7 +33,7 @@ app.use(express.urlencoded({
   limit: '5mb'
 }));
 
-app.use((req, res, next) => {
+app.use(function (req, res, next) {
   console.log(
     new Date().toISOString(),
     req.method,
@@ -98,19 +98,17 @@ function extractText(content) {
   }
 
   if (Array.isArray(content)) {
-    return content
-      .map(function (part) {
-        if (typeof part === 'string') {
-          return part;
-        }
+    return content.map(function (part) {
+      if (typeof part === 'string') {
+        return part;
+      }
 
-        if (part && typeof part.text === 'string') {
-          return part.text;
-        }
+      if (part && typeof part.text === 'string') {
+        return part.text;
+      }
 
-        return '';
-      })
-      .join('');
+      return '';
+    }).join('');
   }
 
   if (typeof content === 'object') {
@@ -122,51 +120,6 @@ function extractText(content) {
   }
 
   return String(content);
-}
-
-function sendSSE(res, payload) {
-  if (typeof payload === 'string') {
-    res.write('data: ' + payload + '\n\n');
-    return;
-  }
-
-  res.write(
-    'data: ' +
-    JSON.stringify(payload) +
-    '\n\n'
-  );
-}
-
-function makeChatChunk(
-  id,
-  model,
-  content,
-  finishReason,
-  includeRole
-) {
-  const delta = {};
-
-  if (includeRole) {
-    delta.role = 'assistant';
-  }
-
-  if (content) {
-    delta.content = content;
-  }
-
-  return {
-    id: id,
-    object: 'chat.completion.chunk',
-    created: Math.floor(Date.now() / 1000),
-    model: model,
-    choices: [
-      {
-        index: 0,
-        delta: delta,
-        finish_reason: finishReason || null
-      }
-    ]
-  };
 }
 
 function getNvidiaErrorMessage(data) {
@@ -257,7 +210,11 @@ app.get('/v1/models', function (req, res) {
 });
 
 app.post('/v1/chat/completions', async function (req, res) {
+  const requestStart = Date.now();
+
+  console.log('==========================================');
   console.log('NVIDIA REQUEST START');
+  console.log('Request timer started.');
 
   if (!NVIDIA_API_KEY) {
     return res.status(500).json({
@@ -357,17 +314,11 @@ app.post('/v1/chat/completions', async function (req, res) {
       NVIDIA_API_BASE + '/chat/completions'
     );
 
-    /*
-     * IMPORTANTE:
-     *
-     * Mesmo quando o Janitor pede stream=true,
-     * nós pedimos uma resposta completa para a NVIDIA.
-     *
-     * Depois transformamos essa resposta em um
-     * SSE compatível com o Janitor.
-     *
-     * Isso evita problemas com o streaming da NVIDIA.
-     */
+    const nvidiaRequestStart = Date.now();
+
+    console.log(
+      'NVIDIA timer started.'
+    );
 
     const response = await axios({
       method: 'POST',
@@ -384,24 +335,43 @@ app.post('/v1/chat/completions', async function (req, res) {
       }
     });
 
+    const nvidiaRequestTime =
+      Date.now() - nvidiaRequestStart;
+
+    const totalRequestTime =
+      Date.now() - requestStart;
+
+    console.log(
+      'NVIDIA response received.'
+    );
+
     console.log(
       'NVIDIA status:',
       response.status
     );
 
-    if (response.status < 200 || response.status >= 300) {
-      const errorMessage =
-        getNvidiaErrorMessage(response.data);
+    console.log(
+      'TIME NVIDIA:',
+      nvidiaRequestTime + ' ms',
+      '(' + (nvidiaRequestTime / 1000).toFixed(2) + ' seconds)'
+    );
 
+    console.log(
+      'TIME TOTAL:',
+      totalRequestTime + ' ms',
+      '(' + (totalRequestTime / 1000).toFixed(2) + ' seconds)'
+    );
+
+    if (response.status < 200 || response.status >= 300) {
       console.error(
         'NVIDIA ERROR:',
         response.status,
-        errorMessage
+        getNvidiaErrorMessage(response.data)
       );
 
       return res.status(response.status).json({
         error: {
-          message: errorMessage,
+          message: getNvidiaErrorMessage(response.data),
           type: 'upstream_error',
           code: response.status
         }
@@ -416,8 +386,7 @@ app.post('/v1/chat/completions', async function (req, res) {
       !data.choices[0]
     ) {
       console.error(
-        'NVIDIA returned an invalid response:',
-        JSON.stringify(data)
+        'NVIDIA returned an invalid response.'
       );
 
       return res.status(502).json({
@@ -459,8 +428,7 @@ app.post('/v1/chat/completions', async function (req, res) {
 
     const completionId =
       data.id ||
-      'chatcmpl-' +
-      Date.now();
+      'chatcmpl-' + Date.now();
 
     const model =
       data.model ||
@@ -494,15 +462,23 @@ app.post('/v1/chat/completions', async function (req, res) {
         result.usage = data.usage;
       }
 
+      const finalTime =
+        Date.now() - requestStart;
+
+      console.log(
+        'Response ready for Janitor.'
+      );
+
+      console.log(
+        'TIME FINAL:',
+        finalTime + ' ms',
+        '(' + (finalTime / 1000).toFixed(2) + ' seconds)'
+      );
+
+      console.log('==========================================');
+
       return res.json(result);
     }
-
-    /*
-     * JANITOR PEDIU STREAMING.
-     *
-     * Vamos entregar a resposta completa como
-     * uma sequência SSE simples e compatível.
-     */
 
     res.status(200);
 
@@ -530,11 +506,51 @@ app.post('/v1/chat/completions', async function (req, res) {
       res.flushHeaders();
     }
 
+    function sendSSE(payload) {
+      if (typeof payload === 'string') {
+        res.write('data: ' + payload + '\n\n');
+        return;
+      }
+
+      res.write(
+        'data: ' +
+        JSON.stringify(payload) +
+        '\n\n'
+      );
+    }
+
+    function makeChunk(
+      contentValue,
+      finishReasonValue,
+      includeRole
+    ) {
+      const delta = {};
+
+      if (includeRole) {
+        delta.role = 'assistant';
+      }
+
+      if (contentValue) {
+        delta.content = contentValue;
+      }
+
+      return {
+        id: completionId,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: model,
+        choices: [
+          {
+            index: 0,
+            delta: delta,
+            finish_reason: finishReasonValue || null
+          }
+        ]
+      };
+    }
+
     sendSSE(
-      res,
-      makeChatChunk(
-        completionId,
-        model,
+      makeChunk(
         '',
         null,
         true
@@ -542,10 +558,7 @@ app.post('/v1/chat/completions', async function (req, res) {
     );
 
     sendSSE(
-      res,
-      makeChatChunk(
-        completionId,
-        model,
+      makeChunk(
         content,
         null,
         false
@@ -553,28 +566,45 @@ app.post('/v1/chat/completions', async function (req, res) {
     );
 
     sendSSE(
-      res,
-      makeChatChunk(
-        completionId,
-        model,
+      makeChunk(
         '',
         finishReason,
         false
       )
     );
 
-    sendSSE(res, '[DONE]');
+    sendSSE('[DONE]');
+
+    const finalTime =
+      Date.now() - requestStart;
+
+    console.log(
+      'Response ready for Janitor.'
+    );
+
+    console.log(
+      'TIME FINAL:',
+      finalTime + ' ms',
+      '(' + (finalTime / 1000).toFixed(2) + ' seconds)'
+    );
+
+    console.log('==========================================');
 
     res.end();
 
-    console.log(
-      'Response successfully sent to Janitor.'
-    );
-
   } catch (error) {
+    const errorTime =
+      Date.now() - requestStart;
+
     console.error(
       'PROXY ERROR:',
       error.message
+    );
+
+    console.error(
+      'TIME UNTIL ERROR:',
+      errorTime + ' ms',
+      '(' + (errorTime / 1000).toFixed(2) + ' seconds)'
     );
 
     if (error.response) {
@@ -584,6 +614,8 @@ app.post('/v1/chat/completions', async function (req, res) {
         error.response.data
       );
     }
+
+    console.log('==========================================');
 
     if (!res.headersSent) {
       return res.status(502).json({
@@ -620,13 +652,27 @@ app.listen(PORT, function () {
   console.log('==========================================');
   console.log('OpenAI to NVIDIA NIM Proxy');
   console.log('==========================================');
-  console.log('Server listening on port ' + PORT);
-  console.log('NVIDIA API: ' + NVIDIA_API_BASE);
-  console.log('Default model: ' + DEFAULT_MODEL);
-  console.log('Reasoning effort: ' + REASONING_EFFORT);
-  console.log('Reasoning display: ' + SHOW_REASONING);
-  console.log('Max tokens default: 16384');
-  console.log('Temperature default: 1.0');
+  console.log(
+    'Server listening on port ' + PORT
+  );
+  console.log(
+    'NVIDIA API: ' + NVIDIA_API_BASE
+  );
+  console.log(
+    'Default model: ' + DEFAULT_MODEL
+  );
+  console.log(
+    'Reasoning effort: ' + REASONING_EFFORT
+  );
+  console.log(
+    'Reasoning display: ' + SHOW_REASONING
+  );
+  console.log(
+    'Max tokens default: 16384'
+  );
+  console.log(
+    'Temperature default: 1.0'
+  );
   console.log(
     'NVIDIA API configured: ' +
     Boolean(NVIDIA_API_KEY)
