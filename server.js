@@ -42,9 +42,9 @@ app.use(
   })
 );
 
-// --------------------------------------------------
-// LOGGING
-// --------------------------------------------------
+// ==================================================
+// REQUEST LOG
+// ==================================================
 
 app.use((req, res, next) => {
   console.log(
@@ -53,9 +53,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// --------------------------------------------------
+// ==================================================
 // HEALTH
-// --------------------------------------------------
+// ==================================================
 
 app.get("/health", (req, res) => {
   res.json({
@@ -79,9 +79,9 @@ app.get("/health/", (req, res) => {
   });
 });
 
-// --------------------------------------------------
+// ==================================================
 // MODEL ALIASES
-// --------------------------------------------------
+// ==================================================
 
 const MODEL_ALIASES = {
   "gpt-3.5-turbo": DEFAULT_MODEL,
@@ -112,40 +112,38 @@ function resolveModel(requestedModel) {
   return MODEL_ALIASES[requestedModel] || DEFAULT_MODEL;
 }
 
-// --------------------------------------------------
-// OPENAI /v1/models
-// --------------------------------------------------
+// ==================================================
+// /v1/models
+// ==================================================
 
 app.get("/v1/models", (req, res) => {
-  const models = [
-    {
-      id: "gpt-4o",
-      object: "model",
-      created: 0,
-      owned_by: "nvidia-nim"
-    },
-    {
-      id: DEFAULT_MODEL,
-      object: "model",
-      created: 0,
-      owned_by: "nvidia-nim"
-    }
-  ];
-
   res.json({
     object: "list",
-    data: models
+    data: [
+      {
+        id: "gpt-4o",
+        object: "model",
+        created: 0,
+        owned_by: "nvidia-nim"
+      },
+      {
+        id: DEFAULT_MODEL,
+        object: "model",
+        created: 0,
+        owned_by: "nvidia-nim"
+      }
+    ]
   });
 });
 
-// --------------------------------------------------
-// DEBUG ENDPOINT
-// --------------------------------------------------
+// ==================================================
+// DEBUG - THREE KIMI TESTS
+// ==================================================
 
 app.get("/debug-nvidia", async (req, res) => {
   console.log("");
   console.log("==========================================");
-  console.log("NVIDIA DIAGNOSTIC TEST");
+  console.log("KIMI K3 DIAGNOSTIC TEST");
   console.log("==========================================");
 
   if (!NVIDIA_API_KEY) {
@@ -154,80 +152,76 @@ app.get("/debug-nvidia", async (req, res) => {
     });
   }
 
+  const headers = {
+    Authorization: `Bearer ${NVIDIA_API_KEY}`,
+    "Content-Type": "application/json"
+  };
+
   const results = {
     model: DEFAULT_MODEL,
     api_base: NVIDIA_API_BASE,
     tests: {}
   };
 
-  const headers = {
-    Authorization: `Bearer ${NVIDIA_API_KEY}`,
-    "Content-Type": "application/json"
+  const baseRequest = {
+    model: DEFAULT_MODEL,
+    messages: [
+      {
+        role: "user",
+        content: "Say hello in one short sentence."
+      }
+    ],
+    temperature: 1.0,
+    max_tokens: 50,
+    stream: false
   };
 
-  // --------------------------------------------
-  // TEST 1 - NON STREAM
-  // --------------------------------------------
+  // ------------------------------------------------
+  // TEST 1 - BASIC
+  // ------------------------------------------------
 
   console.log("");
-  console.log("TEST 1: NVIDIA NON-STREAM");
-  console.log("Model:", DEFAULT_MODEL);
-  console.log("Max tokens: 50");
-  console.log("Temperature: 1.0");
+  console.log("TEST 1 - BASIC KIMI");
+  console.log("Thinking: not specified");
+  console.log("Reasoning: not specified");
 
-  const nonStreamStart = Date.now();
+  const test1Start = Date.now();
 
   try {
     const response = await axios.post(
       `${NVIDIA_API_BASE}/chat/completions`,
-      {
-        model: DEFAULT_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: "Say hello in one short sentence."
-          }
-        ],
-        temperature: 1.0,
-        max_tokens: 50,
-        stream: false
-      },
+      baseRequest,
       {
         headers,
         timeout: 300000
       }
     );
 
-    const nonStreamTime = Date.now() - nonStreamStart;
+    const elapsed = Date.now() - test1Start;
 
     console.log("TEST 1 STATUS:", response.status);
-    console.log("TEST 1 TIME:", nonStreamTime, "ms");
+    console.log("TEST 1 TIME:", elapsed, "ms");
 
-    results.tests.non_stream = {
+    results.tests.basic = {
       status: response.status,
-      time_ms: nonStreamTime,
+      time_ms: elapsed,
       success: true,
       text_received: Boolean(
         response.data?.choices?.[0]?.message?.content
       )
     };
   } catch (error) {
-    const nonStreamTime = Date.now() - nonStreamStart;
+    const elapsed = Date.now() - test1Start;
 
     console.log("TEST 1 ERROR");
-    console.log("TIME:", nonStreamTime, "ms");
+    console.log("TEST 1 TIME:", elapsed, "ms");
     console.log(
-      "STATUS:",
-      error.response?.status || "none"
-    );
-    console.log(
-      "ERROR:",
       error.response?.data || error.message
     );
 
-    results.tests.non_stream = {
+    results.tests.basic = {
       status: error.response?.status || null,
-      time_ms: nonStreamTime,
+      time_ms: elapsed,
       success: false,
       error:
         error.response?.data ||
@@ -235,142 +229,116 @@ app.get("/debug-nvidia", async (req, res) => {
     };
   }
 
-  // --------------------------------------------
-  // TEST 2 - STREAM
-  // --------------------------------------------
+  // ------------------------------------------------
+  // TEST 2 - THINKING
+  // ------------------------------------------------
 
   console.log("");
-  console.log("TEST 2: NVIDIA STREAM");
-  console.log("Model:", DEFAULT_MODEL);
-  console.log("Max tokens: 50");
-  console.log("Temperature: 1.0");
+  console.log("TEST 2 - KIMI WITH THINKING");
+  console.log("Thinking: true");
+  console.log("Reasoning: not specified");
 
-  const streamStart = Date.now();
+  const test2Start = Date.now();
 
   try {
     const response = await axios.post(
       `${NVIDIA_API_BASE}/chat/completions`,
       {
-        model: DEFAULT_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: "Say hello in one short sentence."
-          }
-        ],
-        temperature: 1.0,
-        max_tokens: 50,
-        stream: true
+        ...baseRequest,
+        chat_template_kwargs: {
+          enable_thinking: true
+        }
       },
       {
         headers,
-        responseType: "stream",
         timeout: 300000
       }
     );
 
-    const responseTime = Date.now() - streamStart;
+    const elapsed = Date.now() - test2Start;
 
-    console.log(
-      "TEST 2 HTTP RESPONSE TIME:",
-      responseTime,
-      "ms"
-    );
+    console.log("TEST 2 STATUS:", response.status);
+    console.log("TEST 2 TIME:", elapsed, "ms");
 
-    results.tests.stream = {
+    results.tests.thinking = {
       status: response.status,
-      http_response_time_ms: responseTime
+      time_ms: elapsed,
+      success: true,
+      text_received: Boolean(
+        response.data?.choices?.[0]?.message?.content
+      )
     };
-
-    let firstDataTime = null;
-    let firstData = "";
-
-    await new Promise((resolve) => {
-      let finished = false;
-
-      const finish = () => {
-        if (finished) return;
-        finished = true;
-        resolve();
-      };
-
-      response.data.on("data", (chunk) => {
-        const text = chunk.toString();
-
-        if (firstDataTime === null && text.trim()) {
-          firstDataTime = Date.now() - streamStart;
-          firstData = text.slice(0, 500);
-
-          console.log(
-            "TEST 2 FIRST DATA:",
-            firstDataTime,
-            "ms"
-          );
-
-          console.log(
-            "FIRST DATA CONTENT:",
-            firstData
-          );
-
-          results.tests.stream.first_data_time_ms =
-            firstDataTime;
-        }
-      });
-
-      response.data.on("end", () => {
-        const totalTime = Date.now() - streamStart;
-
-        console.log(
-          "TEST 2 TOTAL TIME:",
-          totalTime,
-          "ms"
-        );
-
-        results.tests.stream.total_time_ms = totalTime;
-
-        finish();
-      });
-
-      response.data.on("error", (error) => {
-        console.log(
-          "TEST 2 STREAM ERROR:",
-          error.message
-        );
-
-        results.tests.stream.error = error.message;
-
-        finish();
-      });
-
-      setTimeout(() => {
-        if (!finished) {
-          console.log(
-            "TEST 2 TIMEOUT AFTER 300000 MS"
-          );
-
-          results.tests.stream.timeout = true;
-
-          finish();
-        }
-      }, 300000);
-    });
   } catch (error) {
-    const streamTime = Date.now() - streamStart;
+    const elapsed = Date.now() - test2Start;
 
     console.log("TEST 2 ERROR");
-    console.log("TIME:", streamTime, "ms");
+    console.log("TEST 2 TIME:", elapsed, "ms");
     console.log(
-      "STATUS:",
-      error.response?.status || "none"
-    );
-    console.log(
-      "ERROR:",
       error.response?.data || error.message
     );
 
-    results.tests.stream = {
+    results.tests.thinking = {
       status: error.response?.status || null,
-      time_ms: streamTime,
+      time_ms: elapsed,
+      success: false,
+      error:
+        error.response?.data ||
+        error.message
+    };
+  }
+
+  // ------------------------------------------------
+  // TEST 3 - THINKING + REASONING HIGH
+  // ------------------------------------------------
+
+  console.log("");
+  console.log("TEST 3 - KIMI FULL REASONING");
+  console.log("Thinking: true");
+  console.log("Reasoning: high");
+
+  const test3Start = Date.now();
+
+  try {
+    const response = await axios.post(
+      `${NVIDIA_API_BASE}/chat/completions`,
+      {
+        ...baseRequest,
+        reasoning_effort: "high",
+        chat_template_kwargs: {
+          enable_thinking: true
+        }
+      },
+      {
+        headers,
+        timeout: 300000
+      }
+    );
+
+    const elapsed = Date.now() - test3Start;
+
+    console.log("TEST 3 STATUS:", response.status);
+    console.log("TEST 3 TIME:", elapsed, "ms");
+
+    results.tests.reasoning_high = {
+      status: response.status,
+      time_ms: elapsed,
+      success: true,
+      text_received: Boolean(
+        response.data?.choices?.[0]?.message?.content
+      )
+    };
+  } catch (error) {
+    const elapsed = Date.now() - test3Start;
+
+    console.log("TEST 3 ERROR");
+    console.log("TEST 3 TIME:", elapsed, "ms");
+    console.log(
+      error.response?.data || error.message
+    );
+
+    results.tests.reasoning_high = {
+      status: error.response?.status || null,
+      time_ms: elapsed,
       success: false,
       error:
         error.response?.data ||
@@ -380,15 +348,15 @@ app.get("/debug-nvidia", async (req, res) => {
 
   console.log("");
   console.log("==========================================");
-  console.log("NVIDIA DIAGNOSTIC FINISHED");
+  console.log("KIMI K3 DIAGNOSTIC FINISHED");
   console.log("==========================================");
 
   res.json(results);
 });
 
-// --------------------------------------------------
+// ==================================================
 // CHAT COMPLETIONS
-// --------------------------------------------------
+// ==================================================
 
 app.post("/v1/chat/completions", async (req, res) => {
   const requestStart = Date.now();
@@ -431,24 +399,22 @@ app.post("/v1/chat/completions", async (req, res) => {
   console.log("Stream:", stream);
   console.log("Reasoning effort:", REASONING_EFFORT);
 
-  // ------------------------------------------------
-  // ROLEPLAY BOUNDARY
-  // ------------------------------------------------
+  // ==================================================
+  // ROLEPLAY INSTRUCTION
+  // ==================================================
 
-  const roleplayInstruction = {
+  messages.unshift({
     role: "system",
     content:
       "Stay in character and respond naturally to the roleplay. " +
       "Do not speak, act, think, feel, decide, or narrate actions " +
       "for the user's character. Only control the characters and " +
       "world elements that belong to you."
-  };
+  });
 
-  messages.unshift(roleplayInstruction);
-
-  // ------------------------------------------------
+  // ==================================================
   // NVIDIA REQUEST
-  // ------------------------------------------------
+  // ==================================================
 
   const nimRequest = {
     model,
@@ -457,7 +423,6 @@ app.post("/v1/chat/completions", async (req, res) => {
     max_tokens: maxTokens,
     stream,
     reasoning_effort: REASONING_EFFORT,
-
     chat_template_kwargs: {
       enable_thinking: ENABLE_THINKING
     }
@@ -473,9 +438,9 @@ app.post("/v1/chat/completions", async (req, res) => {
     `${NVIDIA_API_BASE}/chat/completions`
   );
 
-  // ------------------------------------------------
+  // ==================================================
   // NON-STREAM
-  // ------------------------------------------------
+  // ==================================================
 
   if (!stream) {
     try {
@@ -504,13 +469,20 @@ app.post("/v1/chat/completions", async (req, res) => {
         output = output.slice(0, MAX_RESPONSE_CHARS);
       }
 
-      response.data.choices[0].message.content = output;
+      if (response.data?.choices?.[0]?.message) {
+        response.data.choices[0].message.content = output;
+      }
 
       return res.status(response.status).json(response.data);
     } catch (error) {
       const totalTime = Date.now() - requestStart;
 
-      console.log("NVIDIA error after", totalTime, "ms");
+      console.log(
+        "NVIDIA error after",
+        totalTime,
+        "ms"
+      );
+
       console.log(
         error.response?.data || error.message
       );
@@ -528,9 +500,9 @@ app.post("/v1/chat/completions", async (req, res) => {
     }
   }
 
-  // ------------------------------------------------
+  // ==================================================
   // STREAM
-  // ------------------------------------------------
+  // ==================================================
 
   try {
     const response = await axios.post(
@@ -544,9 +516,7 @@ app.post("/v1/chat/completions", async (req, res) => {
     );
 
     console.log("NVIDIA status:", response.status);
-    console.log(
-      "NVIDIA HTTP response received."
-    );
+    console.log("NVIDIA HTTP response received.");
 
     res.status(200);
 
@@ -568,7 +538,9 @@ app.post("/v1/chat/completions", async (req, res) => {
     let firstTokenReceived = false;
 
     const sendFinish = () => {
-      if (finished) return;
+      if (finished) {
+        return;
+      }
 
       res.write(
         "data: " +
@@ -600,12 +572,6 @@ app.post("/v1/chat/completions", async (req, res) => {
 
         console.log(
           "FIRST TOKEN RECEIVED:",
-          Date.now() - requestStart,
-          "ms"
-        );
-
-        console.log(
-          "FIRST TOKEN TOTAL TIME:",
           Date.now() - requestStart,
           "ms"
         );
@@ -679,8 +645,11 @@ app.post("/v1/chat/completions", async (req, res) => {
         res.write(
           "data: " +
             JSON.stringify({
-              id: parsed.id || "chatcmpl-nvidia",
-              object: "chat.completion.chunk",
+              id:
+                parsed.id ||
+                "chatcmpl-nvidia",
+              object:
+                "chat.completion.chunk",
               created:
                 parsed.created ||
                 Math.floor(Date.now() / 1000),
@@ -712,15 +681,11 @@ app.post("/v1/chat/completions", async (req, res) => {
     });
 
     response.data.on("end", () => {
-      console.log(
-        "NVIDIA stream ended."
-      );
-
+      console.log("NVIDIA stream ended.");
       console.log(
         "Characters sent:",
         sentChars
       );
-
       console.log(
         "TIME TOTAL:",
         Date.now() - requestStart,
@@ -783,9 +748,9 @@ app.post("/v1/chat/completions", async (req, res) => {
   }
 });
 
-// --------------------------------------------------
+// ==================================================
 // ROOT
-// --------------------------------------------------
+// ==================================================
 
 app.get("/", (req, res) => {
   res.json({
@@ -796,9 +761,9 @@ app.get("/", (req, res) => {
   });
 });
 
-// --------------------------------------------------
+// ==================================================
 // 404
-// --------------------------------------------------
+// ==================================================
 
 app.use((req, res) => {
   res.status(404).json({
@@ -806,9 +771,9 @@ app.use((req, res) => {
   });
 });
 
-// --------------------------------------------------
-// START SERVER
-// --------------------------------------------------
+// ==================================================
+// START
+// ==================================================
 
 app.listen(PORT, () => {
   console.log("");
@@ -822,6 +787,9 @@ app.listen(PORT, () => {
   console.log("Reasoning effort:", REASONING_EFFORT);
   console.log("Thinking enabled:", ENABLE_THINKING);
   console.log("Reasoning display:", SHOW_REASONING);
-  console.log("NVIDIA API configured:", Boolean(NVIDIA_API_KEY));
+  console.log(
+    "NVIDIA API configured:",
+    Boolean(NVIDIA_API_KEY)
+  );
   console.log("==========================================");
 });
