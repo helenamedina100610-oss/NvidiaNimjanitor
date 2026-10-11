@@ -18,11 +18,11 @@ const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL || "moonshotai/kimi-k3";
 
 const DEFAULT_TEMPERATURE = 1.0;
-const DEFAULT_MAX_TOKENS = 9638;
+const DEFAULT_MAX_TOKENS = 16638;
 const MAX_RESPONSE_CHARS = 19000;
 
 const REASONING_EFFORT =
-  process.env.REASONING_EFFORT || "high";
+  process.env.REASONING_EFFORT || "max";
 
 const SHOW_REASONING =
   String(process.env.SHOW_REASONING || "false").toLowerCase() === "true";
