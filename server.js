@@ -778,3 +778,4 @@ app.listen(PORT, () => {
   console.log(
     `Max response chars: ${MAX_RESPONSE_CHARS}`
   );
+});
