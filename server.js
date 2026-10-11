@@ -18,18 +18,14 @@ const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL || "moonshotai/kimi-k3";
 
 const DEFAULT_TEMPERATURE = 1.0;
-const DEFAULT_MAX_TOKENS = 18000;
+const DEFAULT_MAX_TOKENS = 16384;
+const MAX_RESPONSE_CHARS = 19000;
 
 const REASONING_EFFORT =
-  process.env.REASONING_EFFORT || "high";
+  process.env.REASONING_EFFORT || "max";
 
 const SHOW_REASONING =
   String(process.env.SHOW_REASONING || "false").toLowerCase() === "true";
-
-const ENABLE_THINKING =
-  String(process.env.ENABLE_THINKING || "true").toLowerCase() === "true";
-
-const MAX_RESPONSE_CHARS = 19000;
 
 const ROLEPLAY_INSTRUCTION = `
 ROLEPLAY CONTROL RULES:
@@ -40,21 +36,25 @@ The user controls their own character completely.
 
 NEVER speak for the user's character.
 NEVER write dialogue for the user's character.
-NEVER decide what the user's character says.
-NEVER decide what the user's character does.
+NEVER decide what the user's character says or does.
 NEVER describe actions performed by the user's character.
-NEVER describe thoughts, feelings, emotions, intentions, reactions, decisions, or sensations belonging to the user's character.
-NEVER assume how the user's character reacts to something.
+NEVER describe thoughts, feelings, intentions, reactions, decisions, or sensations belonging to the user's character.
+NEVER assume how the user's character reacts.
 NEVER move, position, or control the user's character.
-NEVER finish the user's character's action or sentence for them.
+NEVER finish the user's character's action or sentence.
 
 If the user's character needs to respond, stop and leave that response entirely to the user.
 
-You may describe the environment and the actions, dialogue, thoughts, feelings, and reactions of characters that you control.
+You may describe the environment and the actions, dialogue, thoughts, feelings, and reactions of characters you control.
 
-Do not narrate the user's character as if you are the user.
-
-Always preserve the user's agency and wait for the user to decide their character's next action, dialogue, thoughts, feelings, or reaction.
+Write clear, natural, well-organized prose.
+Avoid repetitive descriptions, redundant dialogue, repeated information, and unnecessary restatements.
+Keep character voices distinct and consistent.
+Maintain continuity with the established story and previous messages.
+Use coherent paragraphs, natural dialogue, and appropriate pacing.
+Do not force the story to advance too quickly.
+Do not narrate the user's character as if you were the user.
+Always preserve the user's agency.
 `;
 
 app.use(cors());
@@ -90,10 +90,6 @@ function resolveModel(requestedModel) {
     return MODEL_ALIASES[requestedModel];
   }
 
-  if (requestedModel.startsWith("nvidia/")) {
-    return requestedModel;
-  }
-
   if (requestedModel.includes("/")) {
     return requestedModel;
   }
@@ -112,8 +108,13 @@ function healthResponse() {
   };
 }
 
-app.get("/health", (req, res) => res.json(healthResponse()));
-app.get("/health/", (req, res) => res.json(healthResponse()));
+app.get("/health", (req, res) => {
+  res.json(healthResponse());
+});
+
+app.get("/health/", (req, res) => {
+  res.json(healthResponse());
+});
 
 app.get("/", (req, res) => {
   res.json({
@@ -143,6 +144,7 @@ app.get("/v1/models", (req, res) => {
   res.json({ object: "list", data });
 });
 
+// Diagnostic endpoint: test the NVIDIA API without streaming.
 app.get("/debug-nvidia", async (req, res) => {
   if (!NVIDIA_API_KEY) {
     return res.status(500).json({
@@ -168,14 +170,16 @@ app.get("/debug-nvidia", async (req, res) => {
         }
       );
 
-      const text =
-        response.data?.choices?.[0]?.message?.content || "";
+      const choice = response.data?.choices?.[0];
 
       results[name] = {
         status: response.status,
         time_ms: Date.now() - start,
         success: response.status === 200,
-        text_received: Boolean(text)
+        text_received:
+          typeof choice?.message?.content === "string" &&
+          choice.message.content.length > 0,
+        finish_reason: choice?.finish_reason || null
       };
     } catch (error) {
       results[name] = {
@@ -192,29 +196,23 @@ app.get("/debug-nvidia", async (req, res) => {
 
   await runTest("basic", {
     model: DEFAULT_MODEL,
-    messages: [{ role: "user", content: "Say hello." }],
-    temperature: 0.7,
-    max_tokens: 50,
+    messages: [
+      { role: "user", content: "Reply with a short, natural greeting." }
+    ],
+    temperature: 1.0,
+    max_tokens: 100,
     stream: false
   });
 
-  await runTest("thinking", {
+  await runTest("reasoning_max", {
     model: DEFAULT_MODEL,
-    messages: [{ role: "user", content: "Say hello." }],
+    messages: [
+      { role: "user", content: "Reply with a short, natural greeting." }
+    ],
     temperature: 1.0,
-    max_tokens: 50,
+    max_tokens: 100,
     stream: false,
-    chat_template_kwargs: { enable_thinking: true }
-  });
-
-  await runTest("reasoning_high", {
-    model: DEFAULT_MODEL,
-    messages: [{ role: "user", content: "Say hello." }],
-    temperature: 1.0,
-    max_tokens: 50,
-    stream: false,
-    reasoning_effort: "high",
-    chat_template_kwargs: { enable_thinking: true }
+    reasoning_effort: REASONING_EFFORT
   });
 
   res.json({
@@ -257,6 +255,7 @@ app.post("/v1/chat/completions", async (req, res) => {
       `Model requested: ${requestedModel || "none"} -> NVIDIA: ${model}`
     );
 
+    // Preserve existing system instructions and add roleplay guidance.
     const systemIndex = messages.findIndex(
       (message) => message?.role === "system"
     );
@@ -276,23 +275,31 @@ app.post("/v1/chat/completions", async (req, res) => {
       });
     }
 
+    // Keep the requested temperature within the supported range.
     const requestedTemperature =
       typeof req.body?.temperature === "number"
         ? req.body.temperature
         : DEFAULT_TEMPERATURE;
 
-    // Prevent extreme temperatures from producing chaotic output.
     const temperature = Math.min(
-      2.0,
+      1.0,
       Math.max(0, requestedTemperature)
     );
 
-    const maxTokens =
-      typeof req.body?.max_tokens === "number"
-        ? req.body.max_tokens
-        : DEFAULT_MAX_TOKENS;
+    // Respect the model's token limit even if Janitor requests more.
+    const requestedMaxTokens =
+      typeof req.body?.max_completion_tokens === "number"
+        ? req.body.max_completion_tokens
+        : typeof req.body?.max_tokens === "number"
+          ? req.body.max_tokens
+          : DEFAULT_MAX_TOKENS;
 
-    const stream = Boolean(req.body?.stream);
+    const maxTokens = Math.min(
+      DEFAULT_MAX_TOKENS,
+      Math.max(1, Math.floor(requestedMaxTokens))
+    );
+
+    const stream = req.body?.stream === true;
 
     const nimRequest = {
       model,
@@ -300,22 +307,19 @@ app.post("/v1/chat/completions", async (req, res) => {
       temperature,
       max_tokens: maxTokens,
       stream,
-      reasoning_effort: REASONING_EFFORT,
-      chat_template_kwargs: {
-        enable_thinking: ENABLE_THINKING
-      }
+      reasoning_effort: REASONING_EFFORT
     };
 
-    console.log("Sending request to NVIDIA now...");
+    console.log("Sending request to NVIDIA...");
     console.log("Model:", model);
     console.log("Temperature:", temperature);
     console.log("Max tokens:", maxTokens);
     console.log("Stream:", stream);
     console.log("Reasoning effort:", REASONING_EFFORT);
-    console.log("Thinking enabled:", ENABLE_THINKING);
 
     const nvidiaStart = Date.now();
 
+    // STREAMING RESPONSE
     if (stream) {
       const response = await axios.post(
         `${NVIDIA_API_BASE}/chat/completions`,
@@ -332,21 +336,25 @@ app.post("/v1/chat/completions", async (req, res) => {
       );
 
       console.log("NVIDIA status:", response.status);
-      console.log("NVIDIA HTTP response received.");
 
       res.status(200);
-      res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader(
+        "Content-Type",
+        "text/event-stream; charset=utf-8"
+      );
+      res.setHeader(
+        "Cache-Control",
+        "no-cache, no-transform"
+      );
       res.setHeader("Connection", "keep-alive");
       res.flushHeaders();
 
-      let firstTokenReceived = false;
-      let outputChars = 0;
-      let finished = false;
-      let sseBuffer = "";
-
-      // Handles UTF-8 characters split across network chunks.
       const decoder = new StringDecoder("utf8");
+
+      let sseBuffer = "";
+      let outputChars = 0;
+      let firstTokenReceived = false;
+      let finished = false;
 
       function sendChunk(content) {
         if (finished || res.writableEnded) return;
@@ -371,26 +379,26 @@ app.post("/v1/chat/completions", async (req, res) => {
       function sendFinish() {
         if (finished) return;
 
-        if (!res.writableEnded) {
-          const chunk = {
-            id: `chatcmpl-${Date.now()}`,
-            object: "chat.completion.chunk",
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [
-              {
-                index: 0,
-                delta: {},
-                finish_reason: "stop"
-              }
-            ]
-          };
-
-          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-          res.write("data: [DONE]\n\n");
-        }
-
         finished = true;
+
+        if (res.writableEnded || res.destroyed) return;
+
+        const chunk = {
+          id: `chatcmpl-${Date.now()}`,
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model,
+          choices: [
+            {
+              index: 0,
+              delta: {},
+              finish_reason: "stop"
+            }
+          ]
+        };
+
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        res.write("data: [DONE]\n\n");
       }
 
       function processSseEvent(eventText) {
@@ -405,7 +413,19 @@ app.post("/v1/chat/completions", async (req, res) => {
 
         const data = dataLines.join("\n").trim();
 
-        if (!data || data === "[DONE]") return;
+        if (!data) return;
+
+        if (data === "[DONE]") {
+          sendFinish();
+
+          if (!res.writableEnded) res.end();
+
+          if (!response.data.destroyed) {
+            response.data.destroy();
+          }
+
+          return;
+        }
 
         let parsed;
 
@@ -417,11 +437,12 @@ app.post("/v1/chat/completions", async (req, res) => {
         }
 
         const choice = parsed?.choices?.[0];
+
         if (!choice) return;
 
         const delta = choice.delta || {};
 
-        // Only forward visible response text, never reasoning_content.
+        // Do not expose the model's internal reasoning.
         let content =
           typeof delta.content === "string"
             ? delta.content
@@ -431,8 +452,9 @@ app.post("/v1/chat/completions", async (req, res) => {
 
         if (!firstTokenReceived) {
           firstTokenReceived = true;
+
           console.log(
-            `FIRST TOKEN RECEIVED after ${Date.now() - nvidiaStart} ms`
+            `First token received after ${Date.now() - nvidiaStart} ms`
           );
         }
 
@@ -440,8 +462,13 @@ app.post("/v1/chat/completions", async (req, res) => {
 
         if (remaining <= 0) {
           sendFinish();
+
           if (!res.writableEnded) res.end();
-          response.data.destroy();
+
+          if (!response.data.destroyed) {
+            response.data.destroy();
+          }
+
           return;
         }
 
@@ -454,8 +481,12 @@ app.post("/v1/chat/completions", async (req, res) => {
 
         if (outputChars >= MAX_RESPONSE_CHARS) {
           sendFinish();
+
           if (!res.writableEnded) res.end();
-          response.data.destroy();
+
+          if (!response.data.destroyed) {
+            response.data.destroy();
+          }
         }
       }
 
@@ -466,7 +497,10 @@ app.post("/v1/chat/completions", async (req, res) => {
           !finished &&
           (separatorMatch = /\r?\n\r?\n/.exec(sseBuffer))
         ) {
-          const eventText = sseBuffer.slice(0, separatorMatch.index);
+          const eventText = sseBuffer.slice(
+            0,
+            separatorMatch.index
+          );
 
           sseBuffer = sseBuffer.slice(
             separatorMatch.index + separatorMatch[0].length
@@ -489,25 +523,30 @@ app.post("/v1/chat/completions", async (req, res) => {
       });
 
       response.data.on("end", () => {
-        sseBuffer += decoder.end();
-        consumeSseBuffer(true);
+        if (!finished) {
+          sseBuffer += decoder.end();
+          consumeSseBuffer(true);
 
-        console.log("NVIDIA stream ended.");
-
-        sendFinish();
+          sendFinish();
+        }
 
         if (!res.writableEnded) res.end();
 
-        console.log(`TIME TOTAL: ${Date.now() - requestStart} ms`);
+        console.log("NVIDIA stream ended.");
+        console.log(
+          `Total request time: ${Date.now() - requestStart} ms`
+        );
       });
 
       response.data.on("error", (error) => {
+        if (finished) return;
+
         console.error("NVIDIA streaming error:", error.message);
 
         if (!res.writableEnded) res.end();
       });
 
-      // Only cancel upstream if the client disconnects before completion.
+      // Cancel upstream only if the client disconnects prematurely.
       res.on("close", () => {
         if (!res.writableEnded && !response.data.destroyed) {
           response.data.destroy();
@@ -517,7 +556,7 @@ app.post("/v1/chat/completions", async (req, res) => {
       return;
     }
 
-    // Non-streaming response
+    // NON-STREAMING RESPONSE
     const response = await axios.post(
       `${NVIDIA_API_BASE}/chat/completions`,
       nimRequest,
@@ -544,8 +583,12 @@ app.post("/v1/chat/completions", async (req, res) => {
         choice.message.content.slice(0, MAX_RESPONSE_CHARS);
     }
 
-    console.log(`TIME NVIDIA: ${Date.now() - nvidiaStart} ms`);
-    console.log(`TIME TOTAL: ${Date.now() - requestStart} ms`);
+    console.log(
+      `NVIDIA response time: ${Date.now() - nvidiaStart} ms`
+    );
+    console.log(
+      `Total request time: ${Date.now() - requestStart} ms`
+    );
 
     return res.status(200).json(data);
   } catch (error) {
@@ -565,7 +608,9 @@ app.post("/v1/chat/completions", async (req, res) => {
       error: {
         message:
           error.response?.data?.error?.message ||
-          error.response?.data ||
+          (typeof error.response?.data === "string"
+            ? error.response.data
+            : JSON.stringify(error.response?.data)) ||
           error.message ||
           "Upstream NVIDIA error",
         type: "upstream_error",
@@ -590,6 +635,6 @@ app.listen(PORT, () => {
   console.log(`NVIDIA API: ${NVIDIA_API_BASE}`);
   console.log(`Default model: ${DEFAULT_MODEL}`);
   console.log(`Reasoning effort: ${REASONING_EFFORT}`);
-  console.log(`Thinking enabled: ${ENABLE_THINKING}`);
+  console.log(`Max tokens: ${DEFAULT_MAX_TOKENS}`);
   console.log(`Max response chars: ${MAX_RESPONSE_CHARS}`);
 });
