@@ -22,7 +22,7 @@ const DEFAULT_MAX_TOKENS = 16384;
 const MAX_RESPONSE_CHARS = 19000;
 
 const REASONING_EFFORT =
-  process.env.REASONING_EFFORT || "max";
+  process.env.REASONING_EFFORT || "high";
 
 const SHOW_REASONING =
   String(process.env.SHOW_REASONING || "false").toLowerCase() === "true";
