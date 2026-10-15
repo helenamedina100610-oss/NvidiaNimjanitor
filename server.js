@@ -17,9 +17,9 @@ const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
 const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL || "moonshotai/kimi-k3";
 
-const DEFAULT_TEMPERATURE = 0.9;
-const DEFAULT_MAX_TOKENS = 10000;
-const MAX_RESPONSE_CHARS = 15000;
+const DEFAULT_TEMPERATURE = 0.1;
+const DEFAULT_MAX_TOKENS = 17638;
+const MAX_RESPONSE_CHARS = 19000;
 
 const REASONING_EFFORT =
   process.env.REASONING_EFFORT || "high";
