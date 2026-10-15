@@ -18,7 +18,7 @@ const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL || "moonshotai/kimi-k3";
 
 const DEFAULT_TEMPERATURE = 0.9;
-const DEFAULT_MAX_TOKENS = 13638;
+const DEFAULT_MAX_TOKENS = 10000;
 const MAX_RESPONSE_CHARS = 15000;
 
 const REASONING_EFFORT =
