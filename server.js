@@ -16,9 +16,9 @@ const NVIDIA_API_BASE = (
 ).replace(/\/+$/, "");
 
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
-const DEFAULT_MODEL =
-  process.env.NVIDIA_MODEL || "moonshotai/kimi-k3";
+const DEFAULT_MODEL = "moonshotai/kimi-k3";
 
+// Configuração para roleplay.
 const DEFAULT_TEMPERATURE = 1.0;
 const DEFAULT_MAX_TOKENS = 18000;
 const DEFAULT_REASONING_EFFORT = "high";
@@ -33,59 +33,24 @@ const REASONING_EFFORT = ["low", "high", "max"].includes(reasoningSetting)
   ? reasoningSetting
   : DEFAULT_REASONING_EFFORT;
 
-// Roleplay instructions.
 const ROLEPLAY_INSTRUCTION = `
 ROLEPLAY WRITING INSTRUCTIONS:
 
 Write immersive, coherent, natural roleplay with consistent characterization.
-Respect established personalities, memories, relationships, setting,
-and events from the conversation.
+Respect the established personalities, memories, relationships, setting,
+and events of the conversation.
 
 USER CHARACTER AUTONOMY:
 Never write dialogue, actions, thoughts, emotions, decisions, or reactions
 for the user's character. Never assume what the user's character does or feels.
-Describe other characters, their dialogue, actions, perceptions, and the
+Describe your own characters, their dialogue, actions, perceptions, and the
 surrounding environment. Leave the user's character's response open to them.
-
-MULTI-CHARACTER ROLEPLAY:
-Portray multiple characters naturally in the same scene when appropriate.
-Keep each character's dialogue, personality, motivations, reactions, and
-relationships distinct and consistent.
-
-Allow characters to speak to one another, interrupt, disagree, react to
-events, and interact independently. Track who is speaking and whom each
-character is addressing.
-
-Do not reduce a scene to a single character's perspective when multiple
-characters are present. Do not make every character speak in every reply;
-include those who would naturally participate.
-
-Do not make different characters sound like the same person.
-Keep dialogue attribution clear through context, actions, and natural prose.
-
-STRICT IN-CHARACTER ROLEPLAY:
-Remain fully in character and inside the fictional scene.
-Do not write OOC comments, out-of-character notes, author commentary,
-meta explanations, or messages addressed to the user outside the story.
-
-Never use "OOC:", "(OOC)", "Out of Character", or similar labels.
-Do not discuss roleplay rules, writing quality, plot direction, or instructions
-outside the story unless the user explicitly asks you to.
-
-Do not explain what you are going to write before writing the scene.
-Do not add commentary about the roleplay after the scene.
-Do not end with out-of-character questions such as "What would you like
-to happen next?" or "How should the story continue?"
-
-If clarification is needed, let characters ask naturally within the scene
-whenever possible.
 
 WRITING QUALITY:
 Use natural, fluent English when the conversation is in English.
 Keep dialogue distinct and believable for each character.
 Use descriptive prose when it improves the scene, but avoid repetitive
-phrases, unnecessary recaps, filler, and excessive repetition.
-
+phrases, unnecessary recaps, filler, and excessive repetition of names.
 Do not repeat the same sentence or paragraph within a response.
 Advance the scene naturally without rushing major events or resolving
 conflicts before the user can participate.
@@ -93,11 +58,9 @@ conflicts before the user can participate.
 CONTINUITY:
 Treat previous messages as established story context.
 Do not contradict known facts or suddenly change character personalities.
-Let characters interact with one another independently when appropriate.
-Never control the user's character or decide their next move.
-
-End at a natural point inside the scene where the user can respond.
-Do not append OOC notes before or after the roleplay.
+Do not control every character in the scene at once.
+Do not decide the user's character's next move.
+End at a natural point where the user can respond.
 `.trim();
 
 app.disable("x-powered-by");
@@ -180,18 +143,52 @@ function prepareMessages(inputMessages) {
   return messages;
 }
 
-function getErrorDetails(error) {
+// FIX: reads the real body of an upstream error when Axios
+// returns error.response.data as a Node.js readable stream.
+async function getErrorDetails(error) {
   const status = error.response?.status;
-  const data = error.response?.data;
-
+  let data = error.response?.data;
   let details;
 
-  if (typeof data === "string") {
-    details = data;
-  } else if (data && typeof data === "object") {
-    details = JSON.stringify(data);
-  } else {
-    details = error.message || "Unknown NVIDIA error";
+  if (
+    data &&
+    typeof data === "object" &&
+    typeof data[Symbol.asyncIterator] === "function"
+  ) {
+    try {
+      const chunks = [];
+
+      for await (const chunk of data) {
+        chunks.push(
+          Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        );
+      }
+
+      data = Buffer.concat(chunks).toString("utf8");
+    } catch (readError) {
+      details =
+        `Could not read upstream error body: ${readError.message}`;
+    }
+  }
+
+  if (details === undefined) {
+    if (typeof data === "string") {
+      details = data;
+    } else if (Buffer.isBuffer(data)) {
+      details = data.toString("utf8");
+    } else if (data && typeof data === "object") {
+      try {
+        details = JSON.stringify(data);
+      } catch {
+        details = "Could not serialize upstream error response.";
+      }
+    } else {
+      details = error.message || "Unknown NVIDIA error";
+    }
+  }
+
+  if (!details) {
+    details = error.message || "NVIDIA returned an empty error body.";
   }
 
   if (details.length > 2500) {
@@ -201,6 +198,7 @@ function getErrorDetails(error) {
   return { status, details };
 }
 
+// Health checks.
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
@@ -222,6 +220,7 @@ app.get("/health", (req, res) => {
 
 app.get("/health/", (req, res) => res.redirect(307, "/health"));
 
+// OpenAI-compatible model list.
 app.get("/v1/models", (req, res) => {
   const ids = [
     DEFAULT_MODEL,
@@ -250,6 +249,7 @@ app.get("/v1/models/:model", (req, res) => {
   });
 });
 
+// Parse a complete Server-Sent Event.
 function parseSSE(eventText) {
   const data = eventText
     .split(/\r?\n/)
@@ -292,6 +292,7 @@ app.post("/v1/chat/completions", async (req, res) => {
   const model = resolveModel(body.model);
   const stream = body.stream === true;
 
+  // Preserve the existing temperature configuration.
   const temperature = clampNumber(
     body.temperature,
     DEFAULT_TEMPERATURE,
@@ -315,7 +316,7 @@ app.post("/v1/chat/completions", async (req, res) => {
     reasoning_effort: REASONING_EFFORT,
   };
 
-  if (Number.isSafeInteger(body.seed)) {
+  if (body.seed !== undefined && Number.isSafeInteger(body.seed)) {
     payload.seed = body.seed;
   }
 
@@ -352,7 +353,9 @@ app.post("/v1/chat/completions", async (req, res) => {
       }
     );
   } catch (error) {
-    const { status, details } = getErrorDetails(error);
+    // FIX: await the asynchronous reader so the actual upstream
+    // error body is logged instead of the internal stream object.
+    const { status, details } = await getErrorDetails(error);
 
     log("NVIDIA request failed.", { status, details });
 
@@ -369,6 +372,7 @@ app.post("/v1/chat/completions", async (req, res) => {
     });
   }
 
+  // Non-streaming completion.
   if (!stream) {
     const data = upstream.data;
     const choice = data?.choices?.[0];
@@ -384,6 +388,7 @@ app.post("/v1/chat/completions", async (req, res) => {
       });
     }
 
+    // Never expose internal reasoning text to Janitor AI.
     delete choice.message.reasoning_content;
     data.model = model;
 
@@ -398,6 +403,7 @@ app.post("/v1/chat/completions", async (req, res) => {
     return res.status(200).json(data);
   }
 
+  // Streaming completion.
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -445,15 +451,6 @@ app.post("/v1/chat/completions", async (req, res) => {
     }
   }
 
-  function cancelUpstream() {
-    if (upstreamCancelled) return;
-    upstreamCancelled = true;
-
-    if (upstreamStream && !upstreamStream.destroyed) {
-      upstreamStream.destroy();
-    }
-  }
-
   function processEvent(eventText) {
     if (ended) return;
 
@@ -470,6 +467,7 @@ app.post("/v1/chat/completions", async (req, res) => {
 
     const delta = choice.delta || {};
 
+    // Forward visible text only, never reasoning_content.
     if (typeof delta.content === "string" && delta.content.length > 0) {
       const remaining = MAX_RESPONSE_CHARS - visibleChars;
 
@@ -497,7 +495,10 @@ app.post("/v1/chat/completions", async (req, res) => {
 
     while ((match = /\r?\n\r?\n/.exec(buffer)) !== null) {
       const eventText = buffer.slice(0, match.index);
-      buffer = buffer.slice(match.index + match[0].length);
+
+      buffer = buffer.slice(
+        match.index + match[0].length
+      );
 
       processEvent(eventText);
 
@@ -510,6 +511,15 @@ app.post("/v1/chat/completions", async (req, res) => {
     if (final && buffer.trim()) {
       processEvent(buffer);
       buffer = "";
+    }
+  }
+
+  function cancelUpstream() {
+    if (upstreamCancelled) return;
+    upstreamCancelled = true;
+
+    if (upstreamStream && !upstreamStream.destroyed) {
+      upstreamStream.destroy();
     }
   }
 
@@ -557,6 +567,7 @@ app.post("/v1/chat/completions", async (req, res) => {
   });
 });
 
+// Unknown routes.
 app.use((req, res) => {
   res.status(404).json({
     error: {
@@ -566,6 +577,7 @@ app.use((req, res) => {
   });
 });
 
+// Final Express error handler.
 app.use((error, req, res, next) => {
   log("Unhandled server error.", error.message);
 
