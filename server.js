@@ -16,9 +16,9 @@ const NVIDIA_API_BASE = (
 ).replace(/\/+$/, "");
 
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
-const DEFAULT_MODEL = "moonshotai/kimi-k3";
+const DEFAULT_MODEL =
+  process.env.NVIDIA_MODEL || "moonshotai/kimi-k3";
 
-// Configuração para roleplay.
 const DEFAULT_TEMPERATURE = 1.0;
 const DEFAULT_MAX_TOKENS = 18000;
 const DEFAULT_REASONING_EFFORT = "high";
@@ -33,24 +33,59 @@ const REASONING_EFFORT = ["low", "high", "max"].includes(reasoningSetting)
   ? reasoningSetting
   : DEFAULT_REASONING_EFFORT;
 
+// Roleplay instructions.
 const ROLEPLAY_INSTRUCTION = `
 ROLEPLAY WRITING INSTRUCTIONS:
 
 Write immersive, coherent, natural roleplay with consistent characterization.
-Respect the established personalities, memories, relationships, setting,
-and events of the conversation.
+Respect established personalities, memories, relationships, setting,
+and events from the conversation.
 
 USER CHARACTER AUTONOMY:
 Never write dialogue, actions, thoughts, emotions, decisions, or reactions
 for the user's character. Never assume what the user's character does or feels.
-Describe your own characters, their dialogue, actions, perceptions, and the
+Describe other characters, their dialogue, actions, perceptions, and the
 surrounding environment. Leave the user's character's response open to them.
+
+MULTI-CHARACTER ROLEPLAY:
+Portray multiple characters naturally in the same scene when appropriate.
+Keep each character's dialogue, personality, motivations, reactions, and
+relationships distinct and consistent.
+
+Allow characters to speak to one another, interrupt, disagree, react to
+events, and interact independently. Track who is speaking and whom each
+character is addressing.
+
+Do not reduce a scene to a single character's perspective when multiple
+characters are present. Do not make every character speak in every reply;
+include those who would naturally participate.
+
+Do not make different characters sound like the same person.
+Keep dialogue attribution clear through context, actions, and natural prose.
+
+STRICT IN-CHARACTER ROLEPLAY:
+Remain fully in character and inside the fictional scene.
+Do not write OOC comments, out-of-character notes, author commentary,
+meta explanations, or messages addressed to the user outside the story.
+
+Never use "OOC:", "(OOC)", "Out of Character", or similar labels.
+Do not discuss roleplay rules, writing quality, plot direction, or instructions
+outside the story unless the user explicitly asks you to.
+
+Do not explain what you are going to write before writing the scene.
+Do not add commentary about the roleplay after the scene.
+Do not end with out-of-character questions such as "What would you like
+to happen next?" or "How should the story continue?"
+
+If clarification is needed, let characters ask naturally within the scene
+whenever possible.
 
 WRITING QUALITY:
 Use natural, fluent English when the conversation is in English.
 Keep dialogue distinct and believable for each character.
 Use descriptive prose when it improves the scene, but avoid repetitive
-phrases, unnecessary recaps, filler, and excessive repetition of names.
+phrases, unnecessary recaps, filler, and excessive repetition.
+
 Do not repeat the same sentence or paragraph within a response.
 Advance the scene naturally without rushing major events or resolving
 conflicts before the user can participate.
@@ -58,9 +93,11 @@ conflicts before the user can participate.
 CONTINUITY:
 Treat previous messages as established story context.
 Do not contradict known facts or suddenly change character personalities.
-Do not control every character in the scene at once.
-Do not decide the user's character's next move.
-End at a natural point where the user can respond.
+Let characters interact with one another independently when appropriate.
+Never control the user's character or decide their next move.
+
+End at a natural point inside the scene where the user can respond.
+Do not append OOC notes before or after the roleplay.
 `.trim();
 
 app.disable("x-powered-by");
@@ -93,7 +130,6 @@ function resolveModel(requestedModel) {
 
   const model = requestedModel.trim();
 
-  // Keep common Janitor aliases mapped to Kimi K3.
   const aliases = new Set([
     "gpt-3.5-turbo",
     "gpt-4",
@@ -108,7 +144,6 @@ function resolveModel(requestedModel) {
 
   if (aliases.has(model)) return DEFAULT_MODEL;
 
-  // Also allow an explicit NVIDIA model ID.
   if (model.startsWith("moonshotai/")) return model;
   if (model.startsWith("nvidia/")) return model;
 
@@ -166,7 +201,6 @@ function getErrorDetails(error) {
   return { status, details };
 }
 
-// Health checks.
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
@@ -188,7 +222,6 @@ app.get("/health", (req, res) => {
 
 app.get("/health/", (req, res) => res.redirect(307, "/health"));
 
-// OpenAI-compatible model list.
 app.get("/v1/models", (req, res) => {
   const ids = [
     DEFAULT_MODEL,
@@ -217,7 +250,6 @@ app.get("/v1/models/:model", (req, res) => {
   });
 });
 
-// Parse a complete Server-Sent Event.
 function parseSSE(eventText) {
   const data = eventText
     .split(/\r?\n/)
@@ -260,7 +292,6 @@ app.post("/v1/chat/completions", async (req, res) => {
   const model = resolveModel(body.model);
   const stream = body.stream === true;
 
-  // Kimi K3 accepts temperature from 0 to 1.
   const temperature = clampNumber(
     body.temperature,
     DEFAULT_TEMPERATURE,
@@ -284,11 +315,7 @@ app.post("/v1/chat/completions", async (req, res) => {
     reasoning_effort: REASONING_EFFORT,
   };
 
-  // Kimi K3's NVIDIA API documents these sampling controls as fixed
-  // and does not expose top_p or frequency/presence penalties.
-  // Do not forward those parameters to this model.
-
-  if (body.seed !== undefined && Number.isSafeInteger(body.seed)) {
+  if (Number.isSafeInteger(body.seed)) {
     payload.seed = body.seed;
   }
 
@@ -342,7 +369,6 @@ app.post("/v1/chat/completions", async (req, res) => {
     });
   }
 
-  // Non-streaming completion.
   if (!stream) {
     const data = upstream.data;
     const choice = data?.choices?.[0];
@@ -358,12 +384,13 @@ app.post("/v1/chat/completions", async (req, res) => {
       });
     }
 
-    // Never expose internal reasoning text to Janitor AI.
     delete choice.message.reasoning_content;
     data.model = model;
 
-    if (typeof choice.message.content === "string" &&
-        choice.message.content.length > MAX_RESPONSE_CHARS) {
+    if (
+      typeof choice.message.content === "string" &&
+      choice.message.content.length > MAX_RESPONSE_CHARS
+    ) {
       choice.message.content =
         choice.message.content.slice(0, MAX_RESPONSE_CHARS);
     }
@@ -371,7 +398,6 @@ app.post("/v1/chat/completions", async (req, res) => {
     return res.status(200).json(data);
   }
 
-  // Streaming completion.
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -419,6 +445,15 @@ app.post("/v1/chat/completions", async (req, res) => {
     }
   }
 
+  function cancelUpstream() {
+    if (upstreamCancelled) return;
+    upstreamCancelled = true;
+
+    if (upstreamStream && !upstreamStream.destroyed) {
+      upstreamStream.destroy();
+    }
+  }
+
   function processEvent(eventText) {
     if (ended) return;
 
@@ -435,7 +470,6 @@ app.post("/v1/chat/completions", async (req, res) => {
 
     const delta = choice.delta || {};
 
-    // Forward visible text only, never reasoning_content.
     if (typeof delta.content === "string" && delta.content.length > 0) {
       const remaining = MAX_RESPONSE_CHARS - visibleChars;
 
@@ -466,6 +500,7 @@ app.post("/v1/chat/completions", async (req, res) => {
       buffer = buffer.slice(match.index + match[0].length);
 
       processEvent(eventText);
+
       if (ended) {
         buffer = "";
         return;
@@ -475,15 +510,6 @@ app.post("/v1/chat/completions", async (req, res) => {
     if (final && buffer.trim()) {
       processEvent(buffer);
       buffer = "";
-    }
-  }
-
-  function cancelUpstream() {
-    if (upstreamCancelled) return;
-    upstreamCancelled = true;
-
-    if (upstreamStream && !upstreamStream.destroyed) {
-      upstreamStream.destroy();
     }
   }
 
@@ -531,7 +557,6 @@ app.post("/v1/chat/completions", async (req, res) => {
   });
 });
 
-// Unknown routes.
 app.use((req, res) => {
   res.status(404).json({
     error: {
@@ -541,7 +566,6 @@ app.use((req, res) => {
   });
 });
 
-// Final Express error handler.
 app.use((error, req, res, next) => {
   log("Unhandled server error.", error.message);
 
