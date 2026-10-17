@@ -16,7 +16,7 @@ const NVIDIA_API_BASE = (
 ).replace(/\/+$/, "");
 
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
-const DEFAULT_MODEL = "moonshotai/kimi-k3";
+const DEFAULT_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b";
 
 // Configuração para roleplay.
 const DEFAULT_TEMPERATURE = 1.0;
