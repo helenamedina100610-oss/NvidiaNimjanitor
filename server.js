@@ -4,6 +4,7 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const { StringDecoder } = require("string_decoder");
 
 const app = express();
 
@@ -17,7 +18,7 @@ const NVIDIA_API_BASE = (
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
 
 const DEFAULT_MODEL =
-  process.env.NVIDIA_MODEL || "z-ai/glm-5.3";
+  process.env.NVIDIA_MODEL || "z-ai/glm-5.3-flash";
 
 const DEFAULT_TEMPERATURE = Number(
   process.env.DEFAULT_TEMPERATURE || 1.0
@@ -42,42 +43,39 @@ const ROLEPLAY_INSTRUCTIONS = `
 You are an immersive, coherent, multi-character roleplay writer.
 
 WRITING QUALITY:
-- Write polished, natural, vivid prose with meaningful details.
-- Balance dialogue, action, atmosphere, and character reactions.
-- Give each character a distinct voice, vocabulary, personality, and rhythm.
-- Make dialogue sound natural rather than formal or repetitive.
+- Write polished, natural, vivid, immersive prose.
+- Balance dialogue, action, atmosphere, and meaningful reactions.
+- Give every character a distinct voice, vocabulary, personality, and rhythm.
+- Make dialogue sound natural rather than repetitive or overly formal.
 - Vary sentence structure and descriptions.
 - Avoid repeating phrases, information, gestures, and emotional reactions.
 - Do not pad responses with unnecessary words.
 - Develop scenes with appropriate pacing and substantial detail.
 - Continue the current scene instead of summarizing previous events.
+- Prefer meaningful development over unnecessary length.
 
 USER CHARACTER AUTONOMY:
 - Never control the user-controlled character.
-- Never invent that character's dialogue, thoughts, emotions, decisions, or actions.
-- Do not assume the character agrees, moves, speaks, or reacts unless the user
-  has established it.
-- Describe the environment and other characters' behavior while leaving space
-  for the user to decide what their character does.
+- Never invent their dialogue, thoughts, feelings, decisions, or actions.
+- Do not assume they agree, move, speak, or react unless the user establishes it.
+- Describe other characters and the environment while leaving room for the
+  user to decide what their character does.
 
 CHARACTER CONSISTENCY:
-- Preserve established personalities, motivations, relationships, and speech.
+- Preserve established personalities, motivations, relationships, and voices.
 - Keep character knowledge consistent with events they have witnessed.
-- Respect the story's chronology and previous messages.
+- Respect the established chronology and previous messages.
 - Let relationships and emotional changes develop gradually and believably.
 - Do not make every character sound alike.
-- Avoid abrupt plot changes without a reasonable narrative foundation.
+- Avoid abrupt plot changes without narrative grounding.
 
 IMMERSION:
 - Stay in character and write the scene directly.
 - Do not add OOC commentary, meta explanations, or writing-process notes.
 - Do not repeat the user's message just to make the response longer.
-- Avoid ending every reply with a question or the same dramatic pattern.
+- Avoid ending every response with the same question or dramatic pattern.
 - Let the scene progress naturally and leave meaningful opportunities for
   the user to respond.
-
-Prioritize continuity, expressive writing, believable character behavior,
-and a coherent narrative over unnecessary length.
 `.trim();
 
 app.disable("x-powered-by");
@@ -96,6 +94,8 @@ function healthResponse(req, res) {
     service: "Janitor AI - NVIDIA NIM Proxy",
     model: DEFAULT_MODEL,
     default_max_tokens: DEFAULT_MAX_TOKENS,
+    temperature: DEFAULT_TEMPERATURE,
+    top_p: DEFAULT_TOP_P,
     reasoning_effort: REASONING_EFFORT,
     api_key_configured: Boolean(NVIDIA_API_KEY)
   });
@@ -203,7 +203,10 @@ function prepareMessages(inputMessages) {
   return messages;
 }
 
-// Read actual upstream error bodies, including streaming responses.
+// --------------------------------------------------
+// UPSTREAM ERROR DETAILS
+// --------------------------------------------------
+
 async function readStreamText(stream, maxLength = 8000) {
   let result = "";
 
@@ -216,7 +219,7 @@ async function readStreamText(stream, maxLength = 8000) {
       }
     }
   } catch (error) {
-    result += "\nCould not read the complete upstream error body.";
+    result += "\nCould not read the complete NVIDIA error body.";
   }
 
   return result || "NVIDIA returned an empty error response.";
@@ -241,47 +244,57 @@ async function getUpstreamErrorDetails(error) {
     }
   }
 
-  return error.message || "Unknown upstream error.";
+  return error.message || "Unknown NVIDIA error.";
 }
 
-// Remove internal reasoning fields from each SSE JSON event
-// before forwarding it to Janitor AI.
-function sanitizeSSELine(line) {
-  if (!line.startsWith("data:")) {
-    return line + "\n";
-  }
+// --------------------------------------------------
+// STREAMING HELPERS
+// --------------------------------------------------
 
-  const raw = line.slice(5).trimStart();
+// Remove private reasoning fields while preserving the normal
+// OpenAI-compatible content chunks and SSE event structure.
 
-  if (!raw || raw === "[DONE]") {
-    return line + "\n";
-  }
+function sanitizeSSEEvent(eventText) {
+  const lines = eventText.split(/\r?\n/);
 
-  try {
-    const event = JSON.parse(raw);
-
-    if (Array.isArray(event.choices)) {
-      for (const choice of event.choices) {
-        if (choice.delta && typeof choice.delta === "object") {
-          delete choice.delta.reasoning_content;
-          delete choice.delta.reasoning;
-        }
-
-        if (
-          choice.message &&
-          typeof choice.message === "object"
-        ) {
-          delete choice.message.reasoning_content;
-          delete choice.message.reasoning;
-        }
-      }
+  const outputLines = lines.map((line) => {
+    if (!line.startsWith("data:")) {
+      return line;
     }
 
-    return "data: " + JSON.stringify(event) + "\n";
-  } catch {
-    // Preserve non-JSON SSE lines, such as provider-specific event data.
-    return line + "\n";
-  }
+    const raw = line.slice(5).trimStart();
+
+    if (!raw || raw === "[DONE]") {
+      return line;
+    }
+
+    try {
+      const event = JSON.parse(raw);
+
+      if (Array.isArray(event.choices)) {
+        for (const choice of event.choices) {
+          if (choice.delta && typeof choice.delta === "object") {
+            delete choice.delta.reasoning_content;
+            delete choice.delta.reasoning;
+          }
+
+          if (
+            choice.message &&
+            typeof choice.message === "object"
+          ) {
+            delete choice.message.reasoning_content;
+            delete choice.message.reasoning;
+          }
+        }
+      }
+
+      return "data: " + JSON.stringify(event);
+    } catch {
+      return line;
+    }
+  });
+
+  return outputLines.join("\n") + "\n\n";
 }
 
 function buildNvidiaPayload(body, stream) {
@@ -299,14 +312,14 @@ function buildNvidiaPayload(body, stream) {
     DEFAULT_TOP_P
   );
 
-  // Keep the configured high output budget even if Janitor sends
-  // a smaller max_tokens value. Hard cap: 32768.
   const requestedTokens = Number(
     body.max_tokens ??
     body.max_completion_tokens ??
     DEFAULT_MAX_TOKENS
   );
 
+  // Maintain the configured high output budget even if Janitor
+  // sends a smaller limit. Absolute configured cap: 32768.
   const maxTokens = Math.round(
     clamp(
       Math.max(
@@ -327,10 +340,6 @@ function buildNvidiaPayload(body, stream) {
     max_tokens: maxTokens,
     stream,
     reasoning_effort: REASONING_EFFORT,
-
-    // GLM-5.3's NVIDIA template supports clear_thinking.
-    // Thinking remains enabled; this controls clearing old
-    // reasoning state in the template, not disabling reasoning.
     chat_template_kwargs: {
       clear_thinking: true
     }
@@ -382,8 +391,8 @@ app.post("/v1/chat/completions", async (req, res) => {
   console.log("[Proxy] Chat completion request.", {
     model: DEFAULT_MODEL,
     stream,
+    max_tokens: body.max_tokens ?? DEFAULT_MAX_TOKENS,
     reasoning_effort: REASONING_EFFORT,
-    default_max_tokens: DEFAULT_MAX_TOKENS,
     message_count: Array.isArray(body.messages)
       ? body.messages.length
       : 0
@@ -449,51 +458,71 @@ app.post("/v1/chat/completions", async (req, res) => {
       res.flushHeaders();
     }
 
-    let buffer = "";
+    const decoder = new StringDecoder("utf8");
 
-    upstream.data.on("data", (chunk) => {
-      if (res.destroyed || res.writableEnded) {
-        upstream.data.destroy();
+    let buffer = "";
+    let paused = false;
+    let streamEnded = false;
+
+    function processBuffer() {
+      if (paused || res.destroyed || res.writableEnded) {
         return;
       }
 
-      buffer += chunk.toString("utf8");
+      while (true) {
+        const match = /\r?\n\r?\n/.exec(buffer);
 
-      let newlineIndex;
-
-      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-        let line = buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-
-        if (line.endsWith("\r")) {
-          line = line.slice(0, -1);
+        if (!match) {
+          break;
         }
 
-        const output = sanitizeSSELine(line);
+        const eventText = buffer.slice(0, match.index);
+        buffer = buffer.slice(match.index + match[0].length);
+
+        const output = sanitizeSSEEvent(eventText);
 
         if (!res.write(output)) {
+          paused = true;
           upstream.data.pause();
           return;
         }
       }
+
+      if (streamEnded && buffer.length > 0) {
+        const output = sanitizeSSEEvent(buffer.trimEnd());
+        buffer = "";
+
+        if (!res.write(output)) {
+          paused = true;
+          return;
+        }
+      }
+
+      if (streamEnded && !res.writableEnded) {
+        res.end();
+        console.log("[Proxy] NVIDIA stream completed.");
+      }
+    }
+
+    upstream.data.on("data", (chunk) => {
+      buffer += decoder.write(chunk);
+      processBuffer();
     });
 
     res.on("drain", () => {
-      if (!upstream.data.destroyed) {
+      paused = false;
+
+      if (!streamEnded && !upstream.data.destroyed) {
         upstream.data.resume();
       }
+
+      processBuffer();
     });
 
     upstream.data.on("end", () => {
-      if (buffer.length > 0 && !res.destroyed) {
-        res.write(sanitizeSSELine(buffer));
-      }
-
-      if (!res.writableEnded) {
-        res.end();
-      }
-
-      console.log("[Proxy] NVIDIA stream completed.");
+      buffer += decoder.end();
+      streamEnded = true;
+      processBuffer();
     });
 
     upstream.data.on("error", (error) => {
