@@ -17,7 +17,7 @@ const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
 
 const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL ||
-  "nvidia/nemotron-3.5-super-vl-120b-a12b";
+  "nvidia/nemotron-3-ultra-550b-a55b";
 
 const DEFAULT_TEMPERATURE = Number(
   process.env.DEFAULT_TEMPERATURE || 1.0
