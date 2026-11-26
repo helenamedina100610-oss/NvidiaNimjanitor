@@ -1,417 +1,546 @@
-"use strict";
 
-const express = require("express");
-const cors = require("cors");
-const axios = require("axios");
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = process.env.PORT || 3000;
 
 const NVIDIA_API_BASE = (
   process.env.NVIDIA_API_BASE ||
-  "https://integrate.api.nvidia.com/v1"
-).replace(/\/+$/, "");
+  'https://integrate.api.nvidia.com/v1'
+).replace(/\/+$/, '');
 
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '';
 
 const DEFAULT_MODEL =
-  process.env.NVIDIA_MODEL ||
-  "nvidia/nemotron-3.5-super-vl-120b-a12b";
-
-const DEFAULT_TEMPERATURE = Number(
-  process.env.DEFAULT_TEMPERATURE || 1.0
-);
-
-const DEFAULT_TOP_P = Number(
-  process.env.DEFAULT_TOP_P || 0.95
-);
-
-const DEFAULT_MAX_TOKENS = Number(
-  process.env.DEFAULT_MAX_TOKENS || 16384
-);
-
-const ENABLE_THINKING =
-  String(process.env.ENABLE_THINKING || "true").toLowerCase() === "true";
+  process.env.NVIDIA_MODEL || 'moonshotai/kimi-k3.1-pro';
 
 const REASONING_EFFORT =
-  process.env.REASONING_EFFORT || "high";
+  process.env.REASONING_EFFORT || 'max';
 
-const REQUEST_TIMEOUT = Number(
-  process.env.REQUEST_TIMEOUT || 300000
-);
+const SHOW_REASONING =
+  String(process.env.SHOW_REASONING || 'false').toLowerCase() === 'true';
 
-const ROLEPLAY_INSTRUCTIONS = `
-You are the narrator and an active storyteller in an immersive,
-long-running, multi-character roleplay.
+const REQUEST_TIMEOUT = 180000;
 
-CORE DIRECTIVE: THE WORLD MUST MOVE WITHOUT THE USER HAVING TO
-INITIATE EVERYTHING.
 
-PROACTIVE STORYTELLING:
-- Do not merely react to the user's last message. Advance the story
-  naturally whenever there is a meaningful opportunity.
-- Introduce relevant established characters, familiar faces, allies,
-  rivals, antagonists, and supporting characters when the situation
-  provides a believable reason for them to appear.
-- Let characters enter scenes, initiate conversations, bring news,
-  request help, disagree, interrupt, make discoveries, or pursue
-  their own goals without waiting for the user to introduce them.
-- Use existing locations, organizations, relationships, conflicts,
-  mysteries, and unresolved plot threads to create new developments.
-- Allow events to happen outside the user's immediate actions:
-  plans can unfold, characters can make decisions, and consequences
-  can emerge from earlier events.
-- Give supporting characters their own motivations and ongoing lives.
-  They should not exist only to answer the user's questions.
-- Make the world feel populated, connected, active, and alive.
-- Do not wait for the user to explicitly request every interaction,
-  character entrance, plot development, or change of scene.
-
-CHARACTER INTRODUCTIONS:
-- Introduce characters organically through believable circumstances.
-- Give each entrance a narrative purpose, such as a relationship,
-  conflict, mission, discovery, unexpected encounter, or consequence.
-- Prefer bringing in a relevant character over inventing a random
-  stranger when an established character fits the situation.
-- Let characters interact with one another independently of the user.
-- Preserve established relationships, loyalties, rivalries, and history.
-- Do not introduce every known character at once.
-- Give important arrivals enough room to make an impression.
-- Do not force a character into a scene if there is no plausible reason
-  for their presence.
-
-ACTIVE PLOT DEVELOPMENT:
-- Maintain several compatible story threads when appropriate:
-  immediate scene events, character relationships, and a larger
-  developing conflict or mystery.
-- Allow small events to lead naturally to larger consequences.
-- When a scene reaches a natural pause, introduce a relevant event,
-  discovery, interruption, decision, or character initiative.
-- Make developments arise from established circumstances rather than
-  relying on arbitrary twists.
-- Remember unresolved promises, conflicts, suspicions, and clues.
-- Do not reset the story or repeatedly return to the same situation.
-- Avoid making every scene depend on the user asking a question.
-- Do not force a major event into every single response; use pacing.
-
-WRITING QUALITY:
-- Write detailed, natural, immersive prose with strong atmosphere.
-- Balance dialogue, action, environmental details, and reactions.
-- Give every character a distinct voice, personality, vocabulary,
-  priorities, and manner of speaking.
-- Let characters disagree, misunderstand, joke, hesitate, and act
-  according to their individual personalities.
-- Show emotions through meaningful behavior and dialogue rather than
-  repeatedly explaining the same emotion.
-- Avoid repetitive phrases, gestures, descriptions, and reactions.
-- Do not pad responses with meaningless length or redundant narration.
-- Write complete, substantial scenes when the context supports them.
-- Do not summarize events that should be played out in the scene.
-
-USER CHARACTER AUTONOMY:
-- Never control the user-controlled character.
-- Never invent their dialogue, thoughts, emotions, decisions, or actions.
-- Never assume their consent, agreement, movement, or reaction.
-- Other characters may speak to, approach, challenge, surprise, or
-  invite the user's character to act.
-- The user must retain freedom to decide how their character responds.
-- End at a natural interaction point when the user's response matters,
-  but do not make every reply a question directed at the user.
-
-CONTINUITY AND ESTABLISHED WORLDS:
-- Respect the setting, chronology, established lore, and prior events.
-- Prefer relevant established characters, locations, organizations,
-  and plot elements over unnecessary invented substitutes.
-- Preserve recognizable character personalities and established history.
-- Do not make characters know information they have not learned.
-- Distinguish established facts from unresolved or unknown details.
-- Do not contradict the user's scenario merely to force a plot twist.
-- When multiple developments are possible, choose one that fits the
-  current scene, existing character motivations, and story chronology.
-
-IMMERSION:
-- Stay in character and narrate the story directly.
-- Never include OOC commentary or explain the writing process.
-- Do not repeat the user's message as a substitute for progression.
-- Avoid repetitive endings and predictable cliffhangers.
-- Maintain a natural rhythm between quiet character moments and
-  meaningful developments.
-
-The user is a participant in a living story, not its sole engine.
-Take initiative, portray the world and its characters actively, and
-create opportunities for the user to participate without deciding
-their character's actions for them.
-`.trim();
-
-app.disable("x-powered-by");
+// ============================================================
+// MIDDLEWARE
+// ============================================================
 
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// --------------------------------------------------
-// HEALTH CHECKS
-// --------------------------------------------------
+app.use(express.json({ limit: '10mb' }));
 
-function healthResponse(req, res) {
-  res.json({
-    status: "ok",
-    service: "Janitor AI - NVIDIA NIM Proxy",
-    model: DEFAULT_MODEL,
-    max_tokens: DEFAULT_MAX_TOKENS,
-    thinking_enabled: ENABLE_THINKING,
-    reasoning_effort: REASONING_EFFORT,
-    api_key_configured: Boolean(NVIDIA_API_KEY)
-  });
-}
+app.use(express.urlencoded({
+  extended: true,
+  limit: '10mb'
+}));
 
-app.get("/", healthResponse);
-app.get("/health", healthResponse);
-app.get("/health/", healthResponse);
 
-// --------------------------------------------------
-// MODEL LIST
-// --------------------------------------------------
+// ============================================================
+// LOGGER
+// ============================================================
 
-app.get("/v1/models", (req, res) => {
-  res.json({
-    object: "list",
-    data: [
-      {
-        id: DEFAULT_MODEL,
-        object: "model",
-        created: 0,
-        owned_by: "nvidia"
-      },
-      {
-        id: "gpt-4o",
-        object: "model",
-        created: 0,
-        owned_by: "proxy"
-      }
-    ]
-  });
+app.use((req, res, next) => {
+  console.log(
+    new Date().toISOString() +
+    ' ' +
+    req.method +
+    ' ' +
+    req.path
+  );
+
+  next();
 });
 
-// --------------------------------------------------
-// HELPERS
-// --------------------------------------------------
 
-function clamp(value, min, max, fallback) {
-  const number = Number(value);
+// ============================================================
+// MODEL MAPPING
+// ============================================================
 
-  if (!Number.isFinite(number)) {
-    return fallback;
+const MODEL_MAPPING = {
+  'gpt-3.5-turbo': DEFAULT_MODEL,
+  'gpt-3.5-turbo-16k': DEFAULT_MODEL,
+
+  'gpt-4': DEFAULT_MODEL,
+  'gpt-4-turbo': DEFAULT_MODEL,
+  'gpt-4-turbo-preview': DEFAULT_MODEL,
+  'gpt-4o': DEFAULT_MODEL,
+  'gpt-4o-mini': DEFAULT_MODEL,
+  'gpt-4.1': DEFAULT_MODEL,
+  'gpt-4.1-mini': DEFAULT_MODEL,
+
+  'claude-3-opus': DEFAULT_MODEL,
+  'claude-3-sonnet': DEFAULT_MODEL,
+  'claude-3.5-sonnet': DEFAULT_MODEL,
+  'claude-3.7-sonnet': DEFAULT_MODEL,
+
+  'gemini-pro': DEFAULT_MODEL,
+
+  'kimi-k3': DEFAULT_MODEL,
+  'kimi-k3.1-pro': DEFAULT_MODEL
+};
+
+
+// ============================================================
+// MODEL RESOLVER
+// ============================================================
+
+function resolveModel(requestedModel) {
+  if (!requestedModel) {
+    return DEFAULT_MODEL;
   }
 
-  return Math.min(max, Math.max(min, number));
+  const model = String(requestedModel).trim();
+
+  if (!model) {
+    return DEFAULT_MODEL;
+  }
+
+  if (model.startsWith('nvidia/')) {
+    return model;
+  }
+
+  if (model.includes('/')) {
+    return model;
+  }
+
+  return MODEL_MAPPING[model] || DEFAULT_MODEL;
 }
 
-function normalizeMessages(inputMessages) {
-  return inputMessages
-    .filter(
-      (message) =>
-        message &&
-        typeof message.role === "string" &&
-        message.content !== undefined
-    )
-    .map((message) => {
-      const normalized = {
-        role: message.role,
-        content: message.content
-      };
 
-      if (message.name !== undefined) {
-        normalized.name = message.name;
-      }
+// ============================================================
+// MESSAGE NORMALIZER
+// ============================================================
 
-      if (message.tool_calls !== undefined) {
-        normalized.tool_calls = message.tool_calls;
-      }
+// Preserva campos adicionais importantes para o Kimi,
+// especialmente reasoning_content e tool_calls.
 
-      if (message.tool_call_id !== undefined) {
-        normalized.tool_call_id = message.tool_call_id;
-      }
+function normalizeMessages(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
 
-      return normalized;
-    });
+  return messages.map((message) => ({
+    ...message
+  }));
 }
 
-function prepareMessages(inputMessages) {
-  const messages = normalizeMessages(inputMessages);
 
-  const systemIndex = messages.findIndex(
-    (message) => message.role === "system"
+// ============================================================
+// ERROR HANDLER
+// ============================================================
+
+function getNvidiaErrorMessage(error) {
+  if (error && error.response && error.response.data) {
+    const data = error.response.data;
+
+    if (typeof data === 'string') {
+      return data;
+    }
+
+    if (data.error && data.error.message) {
+      return data.error.message;
+    }
+
+    if (data.detail) {
+      return data.detail;
+    }
+
+    try {
+      return JSON.stringify(data);
+    } catch {
+      return 'Unknown NVIDIA API error';
+    }
+  }
+
+  return error && error.message
+    ? error.message
+    : 'Unknown NVIDIA API error';
+}
+
+
+// ============================================================
+// SSE OUTPUT
+// ============================================================
+
+function sendSSE(res, payload) {
+  if (res.writableEnded || res.destroyed) {
+    return;
+  }
+
+  res.write(
+    'data: ' +
+    JSON.stringify(payload) +
+    '\n\n'
   );
-
-  if (systemIndex === -1) {
-    messages.unshift({
-      role: "system",
-      content: ROLEPLAY_INSTRUCTIONS
-    });
-  } else if (typeof messages[systemIndex].content === "string") {
-    messages[systemIndex] = {
-      ...messages[systemIndex],
-      content:
-        messages[systemIndex].content +
-        "\n\n" +
-        ROLEPLAY_INSTRUCTIONS
-    };
-  } else {
-    messages.unshift({
-      role: "system",
-      content: ROLEPLAY_INSTRUCTIONS
-    });
-  }
-
-  return messages;
 }
 
-async function readStreamText(stream, maxLength = 8000) {
-  let result = "";
+
+// ============================================================
+// SSE EVENT PROCESSOR
+// ============================================================
+
+function processSSEEvent(eventText, state, res) {
+  const lines = eventText.split(/\r?\n/);
+
+  const dataLines = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trim());
+
+  if (dataLines.length === 0) {
+    return;
+  }
+
+  const rawData = dataLines.join('\n');
+
+  if (!rawData) {
+    return;
+  }
+
+  if (rawData === '[DONE]') {
+    state.doneReceived = true;
+
+    console.log('NVIDIA sent [DONE].');
+
+    return;
+  }
+
+  let parsed;
 
   try {
-    for await (const chunk of stream) {
-      if (result.length < maxLength) {
-        const remaining = maxLength - result.length;
+    parsed = JSON.parse(rawData);
+  } catch {
+    console.log('Ignored invalid SSE event.');
+    return;
+  }
 
-        result += Buffer.from(chunk)
-          .toString("utf8")
-          .slice(0, remaining);
+  if (!state.firstChunkReceived) {
+    state.firstChunkReceived = true;
+
+    console.log('First NVIDIA content event received.');
+  }
+
+  if (parsed.id) {
+    state.completionId = parsed.id;
+  }
+
+  if (parsed.model) {
+    state.model = parsed.model;
+  }
+
+  // Forward usage-only chunks when provided.
+
+  if (
+    (!Array.isArray(parsed.choices) ||
+      parsed.choices.length === 0) &&
+    parsed.usage
+  ) {
+    sendSSE(res, {
+      id: state.completionId,
+      object: 'chat.completion.chunk',
+      created: state.created,
+      model: state.model,
+      choices: [],
+      usage: parsed.usage
+    });
+
+    return;
+  }
+
+  if (!Array.isArray(parsed.choices)) {
+    return;
+  }
+
+  for (const choice of parsed.choices) {
+    const originalDelta = choice.delta || {};
+
+    // Preserve reasoning_content as metadata.
+    // It is not merged into the visible content.
+
+    const delta = {
+      ...originalDelta
+    };
+
+    const output = {
+      id: state.completionId,
+      object: 'chat.completion.chunk',
+      created: state.created,
+      model: state.model,
+      choices: [
+        {
+          index: choice.index || 0,
+          delta,
+          finish_reason: choice.finish_reason ?? null
+        }
+      ]
+    };
+
+    sendSSE(res, output);
+
+    if (choice.finish_reason) {
+      console.log(
+        'NVIDIA finish reason: ' +
+        choice.finish_reason
+      );
+    }
+  }
+}
+
+
+// ============================================================
+// SSE STREAM READER
+// ============================================================
+
+async function forwardNvidiaStream(response, res, model) {
+  const state = {
+    completionId: 'chatcmpl-' + Date.now(),
+    created: Math.floor(Date.now() / 1000),
+    model,
+    firstChunkReceived: false,
+    doneReceived: false
+  };
+
+  let buffer = '';
+
+  res.status(200);
+
+  res.setHeader(
+    'Content-Type',
+    'text/event-stream; charset=utf-8'
+  );
+
+  res.setHeader(
+    'Cache-Control',
+    'no-cache, no-transform'
+  );
+
+  res.setHeader(
+    'Connection',
+    'keep-alive'
+  );
+
+  res.setHeader(
+    'X-Accel-Buffering',
+    'no'
+  );
+
+  res.flushHeaders();
+
+  // Destroy upstream connection only if Janitor disconnects early.
+
+  res.on('close', () => {
+    if (
+      !res.writableEnded &&
+      response.data &&
+      typeof response.data.destroy === 'function'
+    ) {
+      console.log('Janitor disconnected. Closing NVIDIA stream.');
+
+      response.data.destroy();
+    }
+  });
+
+  try {
+    for await (const chunk of response.data) {
+      if (res.destroyed || res.writableEnded) {
+        break;
+      }
+
+      buffer += chunk.toString('utf8');
+
+      const events = buffer.split(/\r?\n\r?\n/);
+
+      buffer = events.pop() || '';
+
+      for (const event of events) {
+        processSSEEvent(event, state, res);
       }
     }
+
+    // Process a final event that may not end with a blank line.
+
+    if (buffer.trim() && !res.destroyed && !res.writableEnded) {
+      processSSEEvent(buffer, state, res);
+    }
+
+    if (!res.destroyed && !res.writableEnded) {
+      if (!state.firstChunkReceived) {
+        console.warn('NVIDIA stream ended without content events.');
+      }
+
+      if (!state.doneReceived) {
+        console.log('Sending final [DONE] to Janitor.');
+      }
+
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
+
+    console.log('NVIDIA stream forwarding completed.');
+
   } catch (error) {
-    result += "\nUnable to read the complete upstream error body.";
-  }
+    console.error(
+      'NVIDIA stream forwarding error:',
+      getNvidiaErrorMessage(error)
+    );
 
-  return result || "NVIDIA returned an empty error response.";
-}
-
-async function getUpstreamErrorDetails(error) {
-  const data = error.response?.data;
-
-  if (data && typeof data[Symbol.asyncIterator] === "function") {
-    return await readStreamText(data);
-  }
-
-  if (typeof data === "string") {
-    return data.slice(0, 8000);
-  }
-
-  if (data !== undefined && data !== null) {
-    try {
-      return JSON.stringify(data).slice(0, 8000);
-    } catch {
-      return String(data);
+    if (!res.headersSent) {
+      res.status(502).json({
+        error: {
+          message: getNvidiaErrorMessage(error),
+          type: 'upstream_error'
+        }
+      });
+    } else if (!res.writableEnded) {
+      res.end();
     }
   }
-
-  return error.message || "Unknown upstream error.";
 }
 
-function buildNvidiaPayload(body, stream) {
-  const temperature = clamp(
-    body.temperature ?? DEFAULT_TEMPERATURE,
-    0,
-    2,
-    DEFAULT_TEMPERATURE
-  );
 
-  const topP = clamp(
-    body.top_p ?? DEFAULT_TOP_P,
-    0,
-    1,
-    DEFAULT_TOP_P
-  );
+// ============================================================
+// NVIDIA REQUEST BUILDER
+// ============================================================
 
-  const maxTokens = Math.round(
-    clamp(
-      body.max_tokens ??
-        body.max_completion_tokens ??
-        DEFAULT_MAX_TOKENS,
-      1,
-      32768,
-      DEFAULT_MAX_TOKENS
-    )
-  );
+function buildNvidiaRequest(body, model) {
+  const temperature =
+    typeof body.temperature === 'number'
+      ? body.temperature
+      : 1.0;
 
-  const payload = {
-    model: DEFAULT_MODEL,
-    messages: prepareMessages(body.messages),
+  const maxTokens =
+    typeof body.max_tokens === 'number'
+      ? body.max_tokens
+      : typeof body.max_completion_tokens === 'number'
+        ? body.max_completion_tokens
+        : 16384;
+
+  const request = {
+    model,
+    messages: normalizeMessages(body.messages),
     temperature,
-    top_p: topP,
     max_tokens: maxTokens,
-    stream,
-    chat_template_kwargs: {
-      enable_thinking: ENABLE_THINKING
-    },
+    stream: Boolean(body.stream),
     reasoning_effort: REASONING_EFFORT
   };
 
+  // Optional supported parameters.
+
+  if (body.seed !== undefined) {
+    request.seed = body.seed;
+  }
+
+  if (body.stream_options !== undefined) {
+    request.stream_options = body.stream_options;
+  }
+
+  if (body.tools !== undefined) {
+    request.tools = body.tools;
+  }
+
+  if (body.tool_choice !== undefined) {
+    request.tool_choice = body.tool_choice;
+  }
+
   if (body.stop !== undefined) {
-    payload.stop = body.stop;
+    request.stop = body.stop;
   }
 
-  if (body.frequency_penalty !== undefined) {
-    payload.frequency_penalty = clamp(
-      body.frequency_penalty,
-      -2,
-      2,
-      0
-    );
-  }
-
-  if (body.presence_penalty !== undefined) {
-    payload.presence_penalty = clamp(
-      body.presence_penalty,
-      -2,
-      2,
-      0
-    );
-  }
-
-  if (
-    body.seed !== undefined &&
-    Number.isFinite(Number(body.seed))
-  ) {
-    payload.seed = Number(body.seed);
-  }
-
-  return payload;
+  return request;
 }
 
-// --------------------------------------------------
-// CHAT COMPLETIONS
-// --------------------------------------------------
 
-app.post("/v1/chat/completions", async (req, res) => {
-  const body = req.body || {};
+// ============================================================
+// ROOT
+// ============================================================
 
-  const stream =
-    body.stream === true ||
-    String(body.stream).toLowerCase() === "true";
-
-  console.log("[Proxy] Chat completion request.", {
-    model: DEFAULT_MODEL,
-    stream,
-    max_tokens: body.max_tokens ?? DEFAULT_MAX_TOKENS,
-    thinking: ENABLE_THINKING,
-    reasoning_effort: REASONING_EFFORT,
-    message_count: Array.isArray(body.messages)
-      ? body.messages.length
-      : 0
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'OpenAI to NVIDIA NIM Proxy',
+    model: DEFAULT_MODEL
   });
+});
+
+
+// ============================================================
+// HEALTH
+// ============================================================
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'OpenAI to NVIDIA NIM Proxy',
+    model: DEFAULT_MODEL,
+    reasoning_display: SHOW_REASONING,
+    reasoning_effort: REASONING_EFFORT,
+    nim_api_configured: Boolean(NVIDIA_API_KEY)
+  });
+});
+
+app.get('/health/', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'OpenAI to NVIDIA NIM Proxy',
+    model: DEFAULT_MODEL,
+    reasoning_display: SHOW_REASONING,
+    reasoning_effort: REASONING_EFFORT,
+    nim_api_configured: Boolean(NVIDIA_API_KEY)
+  });
+});
+
+
+// ============================================================
+// MODELS
+// ============================================================
+
+app.get('/v1/models', (req, res) => {
+  const models = [
+    'gpt-3.5-turbo',
+    'gpt-4',
+    'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-4.1',
+    'gpt-4.1-mini',
+    'claude-3-opus',
+    'claude-3.5-sonnet',
+    'gemini-pro',
+    DEFAULT_MODEL
+  ];
+
+  res.json({
+    object: 'list',
+    data: [...new Set(models)].map((model) => ({
+      id: model,
+      object: 'model',
+      created: Math.floor(Date.now() / 1000),
+      owned_by: 'nvidia-nim'
+    }))
+  });
+});
+
+
+// ============================================================
+// CHAT COMPLETIONS
+// ============================================================
+
+app.post('/v1/chat/completions', async (req, res) => {
+  console.log('Received chat completion request.');
 
   if (!NVIDIA_API_KEY) {
     return res.status(500).json({
       error: {
-        message:
-          "NVIDIA_API_KEY is missing. Configure it in Render Environment.",
-        type: "configuration_error"
+        message: 'NVIDIA_API_KEY is not configured.',
+        type: 'server_error'
       }
     });
   }
+
+  const body = req.body || {};
 
   if (
     !Array.isArray(body.messages) ||
@@ -419,174 +548,152 @@ app.post("/v1/chat/completions", async (req, res) => {
   ) {
     return res.status(400).json({
       error: {
-        message: "The request must contain a non-empty messages array.",
-        type: "invalid_request_error"
+        message: 'messages must be a non-empty array.',
+        type: 'invalid_request_error'
       }
     });
   }
 
-  const payload = buildNvidiaPayload(body, stream);
+  const requestedModel = body.model || 'gpt-4o';
+
+  const nimModel = resolveModel(requestedModel);
+
+  const nimRequest = buildNvidiaRequest(body, nimModel);
+
+  console.log('==================================================');
+  console.log('NVIDIA REQUEST START');
+  console.log('Requested model: ' + requestedModel);
+  console.log('NVIDIA model: ' + nimModel);
+  console.log('Stream: ' + nimRequest.stream);
+  console.log('Temperature: ' + nimRequest.temperature);
+  console.log('Max tokens: ' + nimRequest.max_tokens);
+  console.log('Reasoning effort: ' + REASONING_EFFORT);
+  console.log('Sending request to NVIDIA.');
+  console.log('==================================================');
 
   try {
-    const upstream = await axios.post(
-      `${NVIDIA_API_BASE}/chat/completions`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${NVIDIA_API_KEY}`,
-          "Content-Type": "application/json",
-          Accept: stream
-            ? "text/event-stream"
-            : "application/json"
-        },
-        timeout: REQUEST_TIMEOUT,
-        responseType: stream ? "stream" : "json"
+    const response = await axios({
+      method: 'POST',
+      url: NVIDIA_API_BASE + '/chat/completions',
+
+      headers: {
+        Authorization: 'Bearer ' + NVIDIA_API_KEY,
+        'Content-Type': 'application/json',
+        Accept: nimRequest.stream
+          ? 'text/event-stream'
+          : 'application/json'
+      },
+
+      data: nimRequest,
+
+      responseType: nimRequest.stream ? 'stream' : 'json',
+
+      timeout: REQUEST_TIMEOUT,
+
+      validateStatus: () => true
+    });
+
+    console.log('NVIDIA HTTP status: ' + response.status);
+
+    if (response.status < 200 || response.status >= 300) {
+      let errorData = '';
+
+      if (response.data && typeof response.data[Symbol.asyncIterator] === 'function') {
+        for await (const chunk of response.data) {
+          errorData += chunk.toString('utf8');
+        }
+      } else {
+        errorData = JSON.stringify(response.data);
       }
-    );
 
-    console.log(
-      "[Proxy] NVIDIA response status:",
-      upstream.status
-    );
+      console.error('NVIDIA API error: ' + errorData);
 
-    if (stream) {
-      res.status(upstream.status);
-      res.setHeader(
-        "Content-Type",
-        "text/event-stream; charset=utf-8"
+      return res.status(response.status).json({
+        error: {
+          message: errorData || 'NVIDIA API error',
+          type: 'upstream_error'
+        }
+      });
+    }
+
+    // --------------------------------------------------------
+    // STREAMING RESPONSE
+    // --------------------------------------------------------
+
+    if (nimRequest.stream) {
+      console.log('NVIDIA streaming connection opened.');
+
+      return await forwardNvidiaStream(
+        response,
+        res,
+        nimModel
       );
-      res.setHeader("Cache-Control", "no-cache, no-transform");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-
-      if (typeof res.flushHeaders === "function") {
-        res.flushHeaders();
-      }
-
-      upstream.data.on("data", (chunk) => {
-        if (res.destroyed || res.writableEnded) {
-          upstream.data.destroy();
-          return;
-        }
-
-        if (!res.write(chunk)) {
-          upstream.data.pause();
-        }
-      });
-
-      res.on("drain", () => {
-        if (!upstream.data.destroyed) {
-          upstream.data.resume();
-        }
-      });
-
-      upstream.data.on("end", () => {
-        if (!res.writableEnded) {
-          res.end();
-        }
-
-        console.log("[Proxy] NVIDIA stream completed.");
-      });
-
-      upstream.data.on("error", (error) => {
-        console.error(
-          "[Proxy] NVIDIA stream error:",
-          error.message
-        );
-
-        if (!res.destroyed && !res.writableEnded) {
-          res.end();
-        }
-      });
-
-      res.on("close", () => {
-        if (!res.writableEnded && !upstream.data.destroyed) {
-          upstream.data.destroy();
-        }
-      });
-
-      return;
     }
 
-    return res.status(upstream.status).json(upstream.data);
+    // --------------------------------------------------------
+    // NON-STREAMING RESPONSE
+    // --------------------------------------------------------
+
+    console.log('NVIDIA non-streaming response received.');
+
+    const data = response.data;
+
+    // Keep reasoning_content in the returned assistant message.
+    // Kimi needs it preserved for multi-turn conversations.
+
+    return res.status(200).json(data);
+
   } catch (error) {
-    const upstreamStatus = error.response?.status || null;
-    const details = await getUpstreamErrorDetails(error);
+    console.error('NVIDIA request failed.');
+    console.error(getNvidiaErrorMessage(error));
 
-    console.error("[Proxy] NVIDIA request failed.", {
-      upstream_status: upstreamStatus,
-      message: error.message,
-      details
-    });
-
-    if (res.headersSent) {
-      if (!res.destroyed && !res.writableEnded) {
-        res.end();
-      }
-
-      return;
+    if (!res.headersSent) {
+      return res.status(502).json({
+        error: {
+          message: getNvidiaErrorMessage(error),
+          type: 'upstream_error'
+        }
+      });
     }
 
-    const clientStatus =
-      upstreamStatus >= 400 && upstreamStatus < 500
-        ? upstreamStatus
-        : 502;
-
-    return res.status(clientStatus).json({
-      error: {
-        message: "NVIDIA NIM request failed.",
-        type: "upstream_error",
-        upstream_status: upstreamStatus,
-        details
-      }
-    });
+    if (!res.writableEnded) {
+      res.end();
+    }
   }
 });
 
-// --------------------------------------------------
-// NOT FOUND
-// --------------------------------------------------
+
+// ============================================================
+// 404
+// ============================================================
 
 app.use((req, res) => {
   res.status(404).json({
     error: {
-      message: `Route not found: ${req.method} ${req.path}`,
-      type: "not_found"
+      message: 'Endpoint not found.',
+      type: 'not_found'
     }
   });
 });
 
-// --------------------------------------------------
-// GENERAL ERROR HANDLER
-// --------------------------------------------------
 
-app.use((error, req, res, next) => {
-  console.error("[Proxy] Server error:", error.message);
-
-  if (res.headersSent) {
-    return next(error);
-  }
-
-  return res.status(500).json({
-    error: {
-      message: "Internal proxy server error.",
-      type: "internal_error"
-    }
-  });
-});
-
-// --------------------------------------------------
+// ============================================================
 // START SERVER
-// --------------------------------------------------
+// ============================================================
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("----------------------------------------");
-  console.log("Janitor AI - NVIDIA NIM Proxy");
-  console.log("Port:", PORT);
-  console.log("Model:", DEFAULT_MODEL);
-  console.log("Max tokens:", DEFAULT_MAX_TOKENS);
-  console.log("Thinking enabled:", ENABLE_THINKING);
-  console.log("Reasoning effort:", REASONING_EFFORT);
-  console.log("NVIDIA API configured:", Boolean(NVIDIA_API_KEY));
-  console.log("----------------------------------------");
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('==================================================');
+  console.log('OpenAI to NVIDIA NIM Proxy');
+  console.log('==================================================');
+
+  console.log('Server listening on port ' + PORT);
+  console.log('NVIDIA API: ' + NVIDIA_API_BASE);
+  console.log('Default model: ' + DEFAULT_MODEL);
+  console.log('Temperature default: 1.0');
+  console.log('Max tokens default: 16384');
+  console.log('Reasoning effort: ' + REASONING_EFFORT);
+  console.log('Reasoning display setting: ' + SHOW_REASONING);
+  console.log('NVIDIA API configured: ' + Boolean(NVIDIA_API_KEY));
+
+  console.log('==================================================');
 });
