@@ -18,7 +18,7 @@ const DEFAULT_MODEL =
   process.env.NVIDIA_MODEL || 'moonshotai/kimi-k3.1-pro';
 
 const REASONING_EFFORT =
-  process.env.REASONING_EFFORT || 'max';
+  process.env.REASONING_EFFORT || 'low';
 
 const SHOW_REASONING =
   String(process.env.SHOW_REASONING || 'false').toLowerCase() === 'true';
