@@ -35,7 +35,7 @@ const ENABLE_THINKING =
   String(process.env.ENABLE_THINKING || "true").toLowerCase() === "true";
 
 const REASONING_EFFORT =
-  process.env.REASONING_EFFORT || "low";
+  process.env.REASONING_EFFORT || "high";
 
 const REQUEST_TIMEOUT = Number(
   process.env.REQUEST_TIMEOUT || 300000
